@@ -142,8 +142,9 @@ class TPAttention:
         self._fused_qkv = getattr(args, "attn_qkv_fused_weight_memcfg", None) is not None
         self._qg_deint = self._fused_qkv
         # Fuse prefill norm-allgather + fused-QKV in-proj (all_gather_minimal_matmul_async).
-        # Norm's prefill post-AG disabled in layer.py; decode path unchanged.
-        self._fuse_agmm = self._fused_qkv
+        # Norm's prefill post-AG disabled in layer.py; decode path unchanged. Mesh-only: the fused
+        # op is a collective; on a (1,1) mesh (batching without devices) the plain matmul runs.
+        self._fuse_agmm = self._fused_qkv and args.num_devices > 1
         # Decode head split/merge via nlp_create/concat_heads_decode (the batched-decode idiom).
         self._use_nlp_decode_heads = True
         self.k_caches = None
@@ -238,12 +239,14 @@ class TPAttention:
                     max_cols=getattr(self.args, "decode_grid_w", 8),
                     tuning=getattr(self.args, "prefill_tuning", None),
                 )
+                # None config (full-width weights; block does not fit L1): the [seq, dim] output
+                # does not fit either, so the auto matmul writes DRAM.
                 return ttnn.linear(
                     x,
                     weight,
                     compute_kernel_config=self.compute_cfg,
                     program_config=pc,
-                    memory_config=ttnn.L1_MEMORY_CONFIG,
+                    memory_config=ttnn.L1_MEMORY_CONFIG if pc is not None else ttnn.DRAM_MEMORY_CONFIG,
                 )
             return ttnn.linear(x, weight, compute_kernel_config=self.compute_cfg, memory_config=ttnn.DRAM_MEMORY_CONFIG)
         return tpc.sharded_decode_matmul(
