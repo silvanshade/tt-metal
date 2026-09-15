@@ -4,6 +4,7 @@
 
 Branch B: paged decode — uses memory_config=mc and cur_pos_tensor=position_tensor.
 """
+
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_gated_attention import gated_attention_forward_ttnn
 
 
@@ -20,6 +21,7 @@ def decode_forward(
     page_table=None,
     paged_kv_cache_key=None,
     paged_kv_cache_value=None,
+    qk_rotation=None,
 ):
     """Branch B — paged decode: paged_update_cache + paged_sdpa_decode via page_table."""
     output, _, _ = gated_attention_forward_ttnn(
@@ -45,5 +47,6 @@ def decode_forward(
         page_table=page_table,
         paged_kv_cache_key=paged_kv_cache_key,
         paged_kv_cache_value=paged_kv_cache_value,
+        qk_rotation=qk_rotation,
     )
     return output

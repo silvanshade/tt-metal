@@ -3,6 +3,7 @@
 """The Qwen3.5-9B gated full-attention layer — composes config/weights/prefill/decode."""
 
 import ttnn
+from models.common.hadamard import HadamardRotation
 from models.demos.blackhole.qwen36.tt.attention.config import AttentionConfig
 from models.demos.blackhole.qwen36.tt.attention.decode import decode_forward
 from models.demos.blackhole.qwen36.tt.attention.prefill import prefill_forward
@@ -17,10 +18,11 @@ class Qwen36GatedAttention:
     Q and K are normalized with zero-centered RMSNorm before attention.
     """
 
-    def __init__(self, mesh_device, config: AttentionConfig, state_dict, tensor_cache_path=None):
+    def __init__(self, mesh_device, config: AttentionConfig, state_dict, tensor_cache_path=None, qk_rotation=None):
         self.device = mesh_device
         self.config = config
 
+        self.qk_rotation = qk_rotation if qk_rotation is not None else HadamardRotation(mesh_device, config.head_dim)
         self.weights = load_attention_weights(mesh_device, state_dict, tensor_cache_path)
 
         self.compute_kernel_config = ttnn.WormholeComputeKernelConfig(
@@ -73,6 +75,7 @@ class Qwen36GatedAttention:
                 page_table=page_table,
                 paged_kv_cache_key=self.paged_kv_cache_key,
                 paged_kv_cache_value=self.paged_kv_cache_value,
+                qk_rotation=self.qk_rotation,
             )
         elif self.use_paged_attention and T > 1 and chunk_page_table is not None:
             # Branch A — paged prefill
@@ -92,6 +95,7 @@ class Qwen36GatedAttention:
                 chunk_start_idx=chunk_start_idx,
                 chunk_start_idx_tensor=chunk_start_idx_tensor,
                 use_paged_attention=True,
+                qk_rotation=self.qk_rotation,
             )
         else:
             # Branch C — concat prefill
@@ -107,6 +111,7 @@ class Qwen36GatedAttention:
                 past_key=self.past_key,
                 past_value=self.past_value,
                 use_paged_attention=False,
+                qk_rotation=self.qk_rotation,
             )
             self.past_key = new_key
             self.past_value = new_value
