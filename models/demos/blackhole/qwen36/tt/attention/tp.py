@@ -6,11 +6,13 @@ Q/K-norm: HF-correct (1+weight) uniformly at prefill and decode.
 Keep Q bf16 into SDPA unless bf8 mode (QWEN_SDPA_BF8=1).
 Weights interleaved per device; x replicated in, output reduce-scattered on dim=3.
 """
+
 import os
 
 import torch
 
 import ttnn
+from models.common.hadamard import HadamardRotation
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
 from models.demos.blackhole.qwen36.tt.attention.rope_tp import apply_partial_rope_decode, apply_partial_rope_prefill
 from models.tt_transformers.tt.ccl import tt_all_reduce
@@ -121,7 +123,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
 class TPAttention:
     """Standalone TP full-attention with internal per-head KV caches (decode)."""
 
-    def __init__(self, mesh, args, tw, tt_ccl):
+    def __init__(self, mesh, args, tw, tt_ccl, qk_rotation=None):
         self.mesh = mesh
         self.args = args
         self.tw = tw
@@ -134,6 +136,7 @@ class TPAttention:
         self.scale = self.HD**-0.5
         self.rope_dim = args.rope_head_dim
         self.compute_cfg = tpc.COMPUTE_HIFI2
+        self.qk_rotation = qk_rotation if qk_rotation is not None else HadamardRotation(mesh, self.HD)
         # bf8 SDPA (QWEN_SDPA_BF8=1): bf8 Q + bf8 KV; keeps HiFi2 (HiFi4 was slower)
         self._sdpa_bf8 = os.environ.get("QWEN_SDPA_BF8", "0") == "1"
         # Must match load_attention_weights_tp gates
@@ -434,6 +437,8 @@ class TPAttention:
         )
         q = apply_partial_rope_prefill(q, cos_tt, sin_tt, NH, self.rope_dim)
         k = apply_partial_rope_prefill(k, cos_tt, sin_tt, NKV, self.rope_dim)
+        q = self.qk_rotation(q)
+        k = self.qk_rotation(k)
 
         # Fill per-head KV cache for decode (stateful path only)
         if self.k_caches is not None:
@@ -501,7 +506,50 @@ class TPAttention:
             self._kv_shard_cfg_cache[B] = cfg
         return cfg
 
-    def forward_decode(self, x, cur_pos_tt, cos_tt, sin_tt, page_table=None):
+    def forward_decode(
+        self,
+        x: ttnn.Tensor,
+        cur_pos_tt: ttnn.Tensor,
+        cos_tt: ttnn.Tensor,
+        sin_tt: ttnn.Tensor,
+        page_table: ttnn.Tensor | None = None,
+    ) -> ttnn.Tensor:
+        """Decode independent users; retain existing paged and internal-cache paths."""
+        return self._forward_decode(x, cur_pos_tt, cos_tt, sin_tt, page_table, shared_sequence=False)
+
+    def forward_verify(
+        self,
+        x: ttnn.Tensor,
+        cur_pos_tt: ttnn.Tensor,
+        cos_tt: ttnn.Tensor,
+        sin_tt: ttnn.Tensor,
+        page_table: ttnn.Tensor,
+    ) -> ttnn.Tensor:
+        """Verify consecutive tokens with shared KV and per-query causal positions.
+
+        requires: bound paged cache; 1..32 consecutive positions; page-table rows
+            name the same sequence; caller owns logical committed length.
+        ensures: projections and attention run across token rows together; KV writes
+            serialize so updates sharing a quantized cache tile cannot race.
+            Rejection trims logical length: next query position masks stale suffix,
+            and subsequent token writes replace it before attention can read it.
+        hypothesis: L2 sequential decode agreement across a cache-block boundary;
+            every rejection prefix followed by different continuation tokens.
+        """
+        assert self.use_paged and self.paged_k is not None and self.paged_v is not None
+        assert 1 <= x.shape[-2] <= 32
+        return self._forward_decode(x, cur_pos_tt, cos_tt, sin_tt, page_table, shared_sequence=True)
+
+    def _forward_decode(
+        self,
+        x: ttnn.Tensor,
+        cur_pos_tt: ttnn.Tensor,
+        cos_tt: ttnn.Tensor,
+        sin_tt: ttnn.Tensor,
+        page_table: ttnn.Tensor | None,
+        shared_sequence: bool,
+    ) -> ttnn.Tensor:
+        """Share decode arithmetic; serialize shared-sequence cache writes only."""
         tw, NH, NKV, HD = self.tw, self.NH, self.NKV, self.HD
         # Active decode width, taken from the input (x is [1,1,B,dim_frac]). Normally == self.B.
         # BUCKETED decode: a request feeds B<self.B users; every shape/reshape/rope/head-split and
@@ -553,6 +601,8 @@ class TPAttention:
 
         q = apply_partial_rope_decode(q, cos_tt, sin_tt, NH, B, self.rope_dim)
         k = apply_partial_rope_decode(k, cos_tt, sin_tt, NKV, B, self.rope_dim)
+        q = self.qk_rotation(q)
+        k = self.qk_rotation(k)
 
         # SDPA-decode grid: use the real device grid (11x10=110 cores on P150x4), not a
         # hardcoded 64. cores_per_head = grid_total/B (sdpa_decode_program_factory.cpp), so a
@@ -577,16 +627,35 @@ class TPAttention:
             v_p = ttnn.pad(v, [1, B, 32, HD], [0, 0, 0, 0], 0.0, memory_config=_L1)
             ttnn.deallocate(k)
             ttnn.deallocate(v)
-            _kv_cfg = self._kv_shard_cfg(B)
-            k_sh = ttnn.to_memory_config(k_p, _kv_cfg)
-            v_sh = ttnn.to_memory_config(v_p, _kv_cfg)
+            # Only multiple shared-sequence rows need serialization. For one row,
+            # full-range slices alias caller-owned position/page tensors; use the
+            # ordinary single update without slicing or freeing those aliases.
+            if shared_sequence and B > 1:
+                assert page_table is not None
+                for index in range(B):
+                    position = ttnn.slice(cur_pos_tt, (index,), (index + 1,))
+                    pages = ttnn.slice(page_table, (index, 0), (index + 1, page_table.shape[-1]))
+                    for cache, projected in ((keys, k_p), (values, v_p)):
+                        row = ttnn.slice(projected, (0, index, 0, 0), (1, index + 1, 32, HD))
+                        sharded = ttnn.to_memory_config(row, self._kv_shard_cfg(1))
+                        ttnn.deallocate(row)
+                        ttnn.experimental.paged_update_cache(
+                            cache, sharded, update_idxs_tensor=position, page_table=pages
+                        )
+                        ttnn.deallocate(sharded)
+                    ttnn.deallocate(position)
+                    ttnn.deallocate(pages)
+            else:
+                _kv_cfg = self._kv_shard_cfg(B)
+                k_sh = ttnn.to_memory_config(k_p, _kv_cfg)
+                v_sh = ttnn.to_memory_config(v_p, _kv_cfg)
+                # Update accepts BF16 and casts to the bound cache dtype.
+                ttnn.experimental.paged_update_cache(keys, k_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+                ttnn.experimental.paged_update_cache(values, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
+                ttnn.deallocate(k_sh)
+                ttnn.deallocate(v_sh)
             ttnn.deallocate(k_p)
             ttnn.deallocate(v_p)
-            # paged_update_cache takes bf16/fp32 and casts to bf8 cache; decode K/V stay bf16 (prefill fill needs bf8)
-            ttnn.experimental.paged_update_cache(keys, k_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
-            ttnn.experimental.paged_update_cache(values, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
-            ttnn.deallocate(k_sh)
-            ttnn.deallocate(v_sh)
             attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
                 q,
                 keys,
@@ -708,13 +777,16 @@ class TPAttention:
         )
         q = apply_partial_rope_prefill(q, cos_tt, sin_tt, NH, self.rope_dim)
         k = apply_partial_rope_prefill(k, cos_tt, sin_tt, NKV, self.rope_dim)
+        q = self.qk_rotation(q)
+        k = self.qk_rotation(k)
 
-        # bf8 SDPA: paged_fill_cache doesn't cast — cast K/V to cache dtype before fill
-        if self._sdpa_bf8:
-            _k8 = ttnn.typecast(k, ttnn.bfloat8_b)
+        # paged_fill_cache requires the allocated cache dtype, independently of Q precision.
+        if k.dtype != self.paged_k.dtype:
+            _k8 = ttnn.typecast(k, self.paged_k.dtype)
             ttnn.deallocate(k)
             k = _k8
-            _v8 = ttnn.typecast(v, ttnn.bfloat8_b)
+        if v.dtype != self.paged_v.dtype:
+            _v8 = ttnn.typecast(v, self.paged_v.dtype)
             ttnn.deallocate(v)
             v = _v8
 
@@ -744,12 +816,14 @@ class TPAttention:
         else:
             q8 = q
 
-        # chunk_start_idx % q_chunk_size == 0; FLEXIBLE path uses one program per trace.
-        # q/k_chunk=128 is valid (chunk_start always divisible by 2048) and faster than 64/256.
+        # Mixed BF16 queries/BFP8 KV need smaller tiles: 128x128 SDPA CBs
+        # overlap live prefill L1 tensors. Fully quantized and BFP4-KV paths
+        # retain 128; dynamic offsets must be aligned to the selected tile.
+        cap = 64 if not self._sdpa_bf8 and k_paged.dtype == ttnn.bfloat8_b else 128
         if chunk_start_idx_tensor is not None:
-            qk_chunk = 128
+            qk_chunk = cap
         else:
-            cap = 128 if S >= 2048 else 64  # 128 beats 256
+            cap = min(cap, 128 if S >= 2048 else 64)
             qk_chunk = cap if not chunk_start_idx else min(cap, chunk_start_idx & -chunk_start_idx)
         # Full BH grid for SDPA perf (bit-identical to 8×8; see test_tp_chunked_prefill_pcc_sweep)
         sdpa_cfg = ttnn.SDPAProgramConfig(

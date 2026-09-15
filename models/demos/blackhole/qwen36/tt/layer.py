@@ -10,6 +10,7 @@ import ttnn
 from models.common.rmsnorm import RMSNorm
 from models.demos.blackhole.qwen36.tt.attention import AttentionConfig, Qwen36GatedAttention
 from models.demos.blackhole.qwen36.tt.gdn import GDNConfig, Qwen36GatedDeltaNet
+from models.demos.blackhole.qwen36.tt.gdn.verification import GDNVerification
 from models.demos.blackhole.qwen36.tt.mlp import Qwen36MLP
 from models.demos.blackhole.qwen36.utils.substate import substate
 from models.tt_transformers.tt.common import Mode
@@ -22,7 +23,7 @@ class Qwen36DecoderLayer:
     Attention is either GatedAttention (full, with RoPE) or GatedDeltaNet (linear).
     """
 
-    def __init__(self, mesh_device, args, state_dict, layer_num, tensor_cache_path=None, tt_ccl=None):
+    def __init__(self, mesh_device, args, state_dict, layer_num, tensor_cache_path=None, tt_ccl=None, qk_rotation=None):
         self.layer_num = layer_num
         self.device = mesh_device
         self.args = args
@@ -92,7 +93,7 @@ class Qwen36DecoderLayer:
                 tw = load_attention_weights_tp(
                     mesh_device, substate(state_dict, f"layers.{layer_num}.self_attn"), args, cache_dir=tp_cache
                 )
-                self.attention = TPAttention(mesh_device, args, tw, tt_ccl)
+                self.attention = TPAttention(mesh_device, args, tw, tt_ccl, qk_rotation=qk_rotation)
             else:
                 from models.demos.blackhole.qwen36.tt.gdn.tp import TPGatedDeltaNet, load_gdn_weights_tp
 
@@ -103,7 +104,9 @@ class Qwen36DecoderLayer:
         elif self.is_full_attention:
             attn_state = substate(state_dict, f"layers.{layer_num}.self_attn")
             attn_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
-            self.attention = Qwen36GatedAttention(mesh_device, AttentionConfig.from_args(args), attn_state, attn_cache)
+            self.attention = Qwen36GatedAttention(
+                mesh_device, AttentionConfig.from_args(args), attn_state, attn_cache, qk_rotation=qk_rotation
+            )
         else:
             gdn_state = substate(state_dict, f"layers.{layer_num}.linear_attn")
             gdn_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
@@ -179,11 +182,12 @@ class Qwen36DecoderLayer:
         chunk_start_idx_tensor=None,
         valid_len=None,
         gdn_collect=False,
+        gdn_verification: GDNVerification | None = None,
     ):
-        # Validate up front: attention/norm treat non-"prefill" as decode while the MoE experts
-        # treat non-"decode" as prefill, so an unsupported mode would split the two down opposite
-        # paths. Fail fast instead.
-        assert mode in ("decode", "prefill"), f"mode must be 'decode' or 'prefill', got {mode!r}"
+        # Decode and prefill have distinct attention and MoE paths; reject unknown modes before
+        # they take inconsistent branches. Verification uses the TP-specific decode path.
+        assert mode in ("decode", "prefill", "verify"), f"invalid decoder mode: {mode!r}"
+        assert mode != "verify" or self.tp_path, "MTP verification requires TP modules"
         _norm_mode = Mode.PREFILL if mode == "prefill" else Mode.DECODE
         if self.tp_path:
             # TP: DistributedNorm uses the framework's per-norm memory configs.
@@ -225,6 +229,8 @@ class Qwen36DecoderLayer:
                         )
                     else:
                         attn_output = self.attention.forward_prefill(attn_input, cos, sin)
+                elif mode == "verify":
+                    attn_output = self.attention.forward_verify(attn_input, position_tensor, cos, sin, page_table)
                 else:
                     attn_output = self.attention.forward_decode(
                         attn_input, position_tensor, cos, sin, page_table=page_table
@@ -243,6 +249,9 @@ class Qwen36DecoderLayer:
                         attn_output = self.attention.forward_prefill(
                             attn_input, chunk_size=chunk_size, valid_len=valid_len, capture_state=True
                         )
+                elif mode == "verify":
+                    assert gdn_verification is not None and gdn_verification.layer is self.attention
+                    attn_output = gdn_verification.verify_prepared(attn_input)
                 else:
                     attn_output = self.attention.forward_decode(attn_input)
         elif self.is_full_attention:
