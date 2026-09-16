@@ -81,6 +81,21 @@ export QWEN_QK_HADAMARD=0
 
 `QWEN_QK_HADAMARD` is read once when `Qwen36Model` is constructed (`1` by default). The model shares the selected operation with its attention layers and MTP draft. Disabling it leaves Q and K unchanged without allocating a rotation matrix; V is unchanged in either mode. Restart with fresh KV caches and recapture traces when changing the setting: cached keys and queries must use the same basis. Changing the environment after construction does not change an existing model.
 
+
+## MTP verifier trace lifecycle
+
+`Qwen36MTPVerifier.verify(...)` checkpoints one request, computes target logits and normalized hidden rows, and leaves a pending prefix fold. `fold(accepted_inputs)` commits only accepted input tokens, including the anchor but excluding the correction or bonus token.
+
+For shared trace execution:
+
+1. Allocate the verifier after target KV and stable GDN state, before capturing traces.
+2. Warm verification, checkpoint copies, and every supported slot/prefix fold before any trace is parked.
+3. Call `prepare(slot, start_position)` outside capture, then capture only `verify_prepared(...)`. Retain its inputs and outputs for the trace lifetime.
+4. Before each replay, upload the request's inputs and page table, then call `prepare(slot, start_position)`.
+5. After successful replay, call `record_replay(count)` before `fold(accepted_inputs)`. Device replay does not execute Python metadata updates.
+
+The captured verifier contains no committed-slot selection, so requests with the same input shapes share one trace. Only one verification may remain pending across all slots. Trace outputs remain trace-owned; ordinary eager outputs are caller-owned. Reserve trace memory for the captured command streams separately from KV capacity.
+
 ## End-to-end demo test (`demo/text_demo.py`)
 
 The e2e text-generation test lives in `demo/text_demo.py`. It is a single
