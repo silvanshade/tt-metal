@@ -207,6 +207,7 @@ def gated_attention_forward_ttnn(
     chunk_page_table=None,  # [1, num_blocks_in_chunk] int32 — blocks for this chunk only
     chunk_start_idx=None,  # int — absolute position of this chunk in the full sequence
     chunk_start_idx_tensor=None,  # device tensor [1] int32 — runtime offset for trace-replay (flexible SDPA)
+    qk_rotation=None,
 ):
     """
     TTNN forward pass for Gated Attention with KV cache support.
@@ -229,6 +230,7 @@ def gated_attention_forward_ttnn(
         use_optimized_concat: if True, use ttnn.transformer.concatenate_heads
         past_key: ttnn.Tensor [B, H_kv, S_past, D] or None
         past_value: ttnn.Tensor [B, H_kv, S_past, D] or None
+        qk_rotation: optional shared post-RoPE rotation applied to Q and K before caching
 
     Returns:
         output: ttnn.Tensor [B, T, hidden_size]
@@ -276,6 +278,10 @@ def gated_attention_forward_ttnn(
         query_states, key_states = apply_rotary_pos_emb_ttnn(query_states, key_states, cos_4d, sin_4d)
     else:
         query_states, key_states = apply_rotary_pos_emb_ttnn(query_states, key_states, cos, sin)
+
+    if qk_rotation is not None:
+        query_states = qk_rotation(query_states)
+        key_states = qk_rotation(key_states)
 
     # KV cache handling
     _use_sdpa_decode = False
