@@ -6,11 +6,13 @@ Q/K-norm: HF-correct (1+weight) uniformly at prefill and decode.
 Keep Q bf16 into SDPA unless bf8 mode (QWEN_SDPA_BF8=1).
 Weights interleaved per device; x replicated in, output reduce-scattered on dim=3.
 """
+
 import os
 
 import torch
 
 import ttnn
+from models.common.hadamard import HadamardRotation
 from models.demos.blackhole.qwen36.tt import tp_common as tpc
 from models.demos.blackhole.qwen36.tt.attention.rope_tp import apply_partial_rope_decode, apply_partial_rope_prefill
 from models.tt_transformers.tt.ccl import tt_all_reduce
@@ -121,7 +123,7 @@ def load_attention_weights_tp(mesh, state_dict, args, cache_dir=None):
 class TPAttention:
     """Standalone TP full-attention with internal per-head KV caches (decode)."""
 
-    def __init__(self, mesh, args, tw, tt_ccl):
+    def __init__(self, mesh, args, tw, tt_ccl, qk_rotation=None):
         self.mesh = mesh
         self.args = args
         self.tw = tw
@@ -134,6 +136,7 @@ class TPAttention:
         self.scale = self.HD**-0.5
         self.rope_dim = args.rope_head_dim
         self.compute_cfg = tpc.COMPUTE_HIFI2
+        self.qk_rotation = qk_rotation if qk_rotation is not None else HadamardRotation(mesh, self.HD)
         # bf8 SDPA (QWEN_SDPA_BF8=1): bf8 Q + bf8 KV; keeps HiFi2 (HiFi4 was slower)
         self._sdpa_bf8 = os.environ.get("QWEN_SDPA_BF8", "0") == "1"
         # Must match load_attention_weights_tp gates
@@ -434,6 +437,8 @@ class TPAttention:
         )
         q = apply_partial_rope_prefill(q, cos_tt, sin_tt, NH, self.rope_dim)
         k = apply_partial_rope_prefill(k, cos_tt, sin_tt, NKV, self.rope_dim)
+        q = self.qk_rotation(q)
+        k = self.qk_rotation(k)
 
         # Fill per-head KV cache for decode (stateful path only)
         if self.k_caches is not None:
@@ -596,6 +601,8 @@ class TPAttention:
                 scale=self.scale,
                 program_config=sdpa_dec_cfg,
                 # Emit to L1: consumed by the L1 sigmoid-gate multiply next (output-only, doesn't
+        q = self.qk_rotation(q)
+        k = self.qk_rotation(k)
                 # change the SDPA reduction), before the wo matmul + all-reduce re-materialize to DRAM.
                 memory_config=_L1,
             )
@@ -770,6 +777,8 @@ class TPAttention:
                 dtype=ttnn.int32,
                 layout=ttnn.ROW_MAJOR_LAYOUT,
                 device=self.mesh,
+        q = self.qk_rotation(q)
+        k = self.qk_rotation(k)
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
             )
             sdpa_page_table = ttnn.concat([page_table, zeros_pad], dim=-1)
