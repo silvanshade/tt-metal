@@ -12,6 +12,7 @@ import itertools
 import torch
 
 import ttnn
+from models.demos.blackhole.qwen36.tt.rope import rope_inv_freq
 
 
 def build_rope_tables(device, rope_dim, max_seq_len, theta):
@@ -249,19 +250,20 @@ def apply_interleaved_mrope(freqs, mrope_section):
     return freqs_t
 
 
-def rot_mats_decode(device, rope_dim, max_seq_len, theta, positions):
+def rot_mats_decode(device, rope_dim, max_seq_len, theta, positions, rope_scaling=None):
     """Return [cos, sin] each [1, B, 1, rope_dim] for the given per-user positions.
 
     positions: torch.Tensor [B] of int positions. Built on host (small) then
     replicated to the mesh — matches apply_partial_rope_decode's expected layout.
+    rope_scaling: HF ``rope_parameters`` (see ``rope_inv_freq``); None is plain RoPE.
     """
-    inv_freq = 1.0 / (theta ** (torch.arange(0, rope_dim, 2).float() / rope_dim))
+    inv_freq, scale = rope_inv_freq(rope_dim, theta, rope_scaling)
     pos = positions.float()
     freqs = torch.outer(pos, inv_freq)  # [B, rope_dim/2]
     emb = torch.cat([freqs, freqs], dim=-1)  # [B, rope_dim]
     B = positions.shape[0]
-    cos = emb.cos().reshape(1, B, 1, rope_dim).to(torch.bfloat16)
-    sin = emb.sin().reshape(1, B, 1, rope_dim).to(torch.bfloat16)
+    cos = (emb.cos() * scale).reshape(1, B, 1, rope_dim).to(torch.bfloat16)
+    sin = (emb.sin() * scale).reshape(1, B, 1, rope_dim).to(torch.bfloat16)
     cos_tt = ttnn.from_torch(
         cos, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device, mesh_mapper=ttnn.ReplicateTensorToMesh(device)
     )
@@ -271,15 +273,16 @@ def rot_mats_decode(device, rope_dim, max_seq_len, theta, positions):
     return cos_tt, sin_tt
 
 
-def rot_mats_prefill(device, rope_dim, seq_len, theta, position_ids=None, mrope_section=None, attention_scaling=1.0):
+def rot_mats_prefill(device, rope_dim, seq_len, theta, position_ids=None, mrope_section=None, rope_scaling=None):
     """Return [cos, sin] each [1, 1, seq_len, rope_dim].
 
     position_ids: 3D M-RoPE indices [3, bs, seq_len] (or 2D [bs, seq_len], expanded inside
     get_rot_mats). When None, defaults to text positions arange(seq_len) — the (t==h==w) case
     where interleaved-mrope collapses to ordinary 1D RoPE, so the result is independent of
     mrope_section and identical to the pre-M-RoPE behaviour.
+    rope_scaling: HF ``rope_parameters`` (see ``rope_inv_freq``); None is plain RoPE.
     """
-    inv_freq = 1.0 / (theta ** (torch.arange(0, rope_dim, 2).float() / rope_dim))
+    inv_freq, attention_scaling = rope_inv_freq(rope_dim, theta, rope_scaling)
     if position_ids is None:
         position_ids = torch.arange(seq_len).view(1, -1)
     if mrope_section is None:
