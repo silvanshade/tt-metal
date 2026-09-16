@@ -189,7 +189,10 @@ class Qwen36MLP:
         )
 
     def forward(self, x):
-        if self.num_devices > 1:
+        # Sharded-module path (args.tp_path): 4D [1,1,T,dim] input from DistributedNorm, output
+        # fractured on hidden; on a (1,1) mesh the reduce is a no-op. Otherwise the 3D single-device
+        # forward.
+        if getattr(self.args, "tp_path", self.num_devices > 1):
             return self._forward_tp(x)
         w = self.weights
         T = x.shape[1] if len(x.shape) >= 3 else 1
@@ -285,14 +288,22 @@ class Qwen36MLP:
             pc_up = tpc.create_prefill_mlp_matmul_program_config(
                 seq, args.dim, w.w3.shape[-1], max_cols=_gw, tuning=_pt
             )
-            # L1 output (gate/up outputs; down output via mc_out below): +FPU, avoids the DRAM round-trip
-            # (test_mlp_matmul_sweep_prefill *_outL1). The [seq,N] tensors fit L1 at the prefill chunk.
-            w1_out = ttnn.linear(
-                x, w.w1, compute_kernel_config=ckc, program_config=pc_gate, memory_config=ttnn.L1_MEMORY_CONFIG
-            )
-            w3_out = ttnn.linear(
-                x, w.w3, compute_kernel_config=ckc, program_config=pc_up, memory_config=ttnn.L1_MEMORY_CONFIG
-            )
+            if pc_gate is None or pc_up is None:
+                # Full-width weights (TP=1 running the sharded modules): the tuned 2D block does not
+                # fit L1 (tp_common.create_prefill_matmul_program_config) and neither does the
+                # [seq, N] output, so run the auto matmul to DRAM with the activation on the op.
+                w1_out = ttnn.linear(x, w.w1, activation="silu", compute_kernel_config=ckc, memory_config=mc)
+                w3_out = ttnn.linear(x, w.w3, compute_kernel_config=ckc, memory_config=mc)
+            else:
+                # L1 output (gate/up outputs; down output via mc_out below): +FPU, avoids the DRAM
+                # round-trip (test_mlp_matmul_sweep_prefill *_outL1). The [seq,N] tensors fit L1 at
+                # the prefill chunk.
+                w1_out = ttnn.linear(
+                    x, w.w1, compute_kernel_config=ckc, program_config=pc_gate, memory_config=ttnn.L1_MEMORY_CONFIG
+                )
+                w3_out = ttnn.linear(
+                    x, w.w3, compute_kernel_config=ckc, program_config=pc_up, memory_config=ttnn.L1_MEMORY_CONFIG
+                )
             _silu_fused = True
         else:
             # Interleaved weights: auto matmul program for decode and prefill.
@@ -332,8 +343,11 @@ class Qwen36MLP:
                 tuning=getattr(args, "prefill_tuning", None),
             )
         # down-proj OUTPUT in L1 for the tuned prefill path (DRAM input `hidden` + L1 output = the
-        # validated sweep outL1 config; tt_all_reduce already consumes an L1 partial).
-        mc_w2_out = ttnn.L1_MEMORY_CONFIG if (x.shape[-2] <= ttnn.TILE_SIZE or _prefill_tuned) else mc
+        # validated sweep outL1 config; tt_all_reduce already consumes an L1 partial). A None config
+        # (full-width weights, block does not fit L1) means the output does not fit either: DRAM.
+        mc_w2_out = (
+            ttnn.L1_MEMORY_CONFIG if (x.shape[-2] <= ttnn.TILE_SIZE or (_prefill_tuned and w2_pc is not None)) else mc
+        )
         partial = ttnn.linear(hidden, w.w2, compute_kernel_config=ckc, memory_config=mc_w2_out, program_config=w2_pc)
         ttnn.deallocate(hidden)
 
