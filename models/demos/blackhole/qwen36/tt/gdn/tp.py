@@ -271,9 +271,9 @@ class TPGatedDeltaNet:
             self.reset_state()
             return
         # Zero sources must exist (reset_state runs first; no lazy alloc during trace)
-        assert self._zero_conv0 is not None and self._zero_conv_carry is not None and self._zero_rec is not None, (
-            "zero sources missing; reset_state must run before reset_state_inplace"
-        )
+        assert (
+            self._zero_conv0 is not None and self._zero_conv_carry is not None and self._zero_rec is not None
+        ), "zero sources missing; reset_state must run before reset_state_inplace"
         for cs in self.conv_states:
             ttnn.copy(self._zero_conv0, cs)
         ttnn.copy(self._zero_rec, self.rec_state)
@@ -754,13 +754,13 @@ class TPGatedDeltaNet:
     def _write_recurrent_state_prefix(self, new_rec, B):
         """Write active rows [0:B] without reading or copying idle rows."""
         grid_size = self.mesh.compute_with_storage_grid_size()
-        assert grid_size.x >= 8 and grid_size.y >= 6, (
-            f"GDN prefix state write needs an 8x6 core rectangle, got {grid_size.x}x{grid_size.y}"
-        )
+        assert (
+            grid_size.x >= 8 and grid_size.y >= 6
+        ), f"GDN prefix state write needs an 8x6 core rectangle, got {grid_size.x}x{grid_size.y}"
         nhw = B * self.Nv * self.Dk
-        assert nhw % ttnn.TILE_SIZE == 0, (
-            f"GDN prefix state rows B={B}, Nv={self.Nv}, Dk={self.Dk} -> {nhw} is not tile-aligned"
-        )
+        assert (
+            nhw % ttnn.TILE_SIZE == 0
+        ), f"GDN prefix state rows B={B}, Nv={self.Nv}, Dk={self.Dk} -> {nhw} is not tile-aligned"
         n_tiles = nhw // ttnn.TILE_SIZE
 
         # Prefer the tuned 8x6=48-core rectangle, which every TP=4 shape hits (Nv=12 -> nhw=B*1536
@@ -1072,9 +1072,11 @@ class TPGatedDeltaNet:
         for tensor in projected:
             ttnn.deallocate(tensor)
         gated = ttnn.concat(gated_rows, dim=1, memory_config=ttnn.L1_MEMORY_CONFIG)
+        # A singleton concat may alias its row; consume it before releasing rows.
+        output = self._project_decode_output(gated)
         for tensor in gated_rows:
             ttnn.deallocate(tensor)
-        return self._project_decode_output(gated)
+        return output
 
     def _decode_gated(
         self,

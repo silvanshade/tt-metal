@@ -567,9 +567,9 @@ class Qwen36Model:
         if layer_indices is not None:
             layer_indices = list(layer_indices)
             assert layer_indices, "layer_indices must be non-empty"
-            assert all(0 <= i < len(args.attention_type_list) for i in layer_indices), (
-                f"layer_indices {layer_indices} out of range [0, {len(args.attention_type_list)})"
-            )
+            assert all(
+                0 <= i < len(args.attention_type_list) for i in layer_indices
+            ), f"layer_indices {layer_indices} out of range [0, {len(args.attention_type_list)})"
             args.layer_indices = layer_indices
             args.n_layers = len(layer_indices)
         elif n_layers is not None:
@@ -746,9 +746,9 @@ class Qwen36Model:
         n = int(pos.numel())
         if n == 0:
             return x
-        assert n == int(vision_tokens.shape[0]), (
-            f"input_ids has {n} image-token positions but vision_tokens has {int(vision_tokens.shape[0])} rows"
-        )
+        assert n == int(
+            vision_tokens.shape[0]
+        ), f"input_ids has {n} image-token positions but vision_tokens has {int(vision_tokens.shape[0])} rows"
 
         # Placement index: the dim-0 rows of the flattened [rows, H] embedding to fill,
         # repeated across the hidden dim so the whole hidden vector at each row is written.
@@ -1229,6 +1229,9 @@ class Qwen36Model:
         if self._chunked_trace_output is None:
             self._chunked_trace_output = ttnn.empty_like(warmup_out)
         ttnn.copy(warmup_out, self._chunked_trace_output)
+        if self.mtp is not None:
+            with self.mtp.prefill_request(torch.zeros(1, chunk_size + 1, dtype=torch.int32), 0):
+                self.mtp.observe_prefill(warmup_out, 0, page_table)
         ttnn.deallocate(warmup_out)
         ttnn.synchronize_device(device)
 
@@ -1849,6 +1852,8 @@ class Qwen36Model:
         for layer in self.layers:
             if not layer.is_full_attention:
                 layer.attention.remap_slots(remap)
+        if self.mtp is not None:
+            self.mtp.remap_slots(remap)
 
     def prefill_chunked_peruser(self, token_ids_list, page_table, valid_lens=None):
         """Batched per-user LONG-prefill (TP, eager). Runs the single-user chunk-outer path
@@ -1873,12 +1878,13 @@ class Qwen36Model:
         assert self._paged_kv_caches is not None, "Call allocate_kv_caches first"
         # The chunked path keys its chunk math on _chunked_chunk_size (default 2048); a parked
         # bucket trace leaves it at 128, breaking num_full/tail sizing. Require it released first.
-        assert getattr(self, "_bucket_trace_id", None) is None, (
-            "release the bucket prefill trace before prefill_chunked_peruser (_chunked_chunk_size would be wrong)"
-        )
-        assert self._chunked_chunk_size in (None, 2048), (
-            f"prefill_chunked_peruser expects the 2048-token chunk; got _chunked_chunk_size={self._chunked_chunk_size}"
-        )
+        assert (
+            getattr(self, "_bucket_trace_id", None) is None
+        ), "release the bucket prefill trace before prefill_chunked_peruser (_chunked_chunk_size would be wrong)"
+        assert self._chunked_chunk_size in (
+            None,
+            2048,
+        ), f"prefill_chunked_peruser expects the 2048-token chunk; got _chunked_chunk_size={self._chunked_chunk_size}"
 
         B = len(token_ids_list)
         page_table_torch = page_table if isinstance(page_table, torch.Tensor) else ttnn.to_torch(page_table)
@@ -2237,7 +2243,8 @@ class Qwen36Model:
                     continue
                 seen.add(key)
                 toks = torch.zeros(1, actual_len, dtype=torch.int32)
-                self.prefill_masked_bucket(toks, page_table, actual_len=actual_len, bucket=bucket)
+                with self.mtp.prefill_request(toks, 0) if self.mtp else nullcontext():
+                    self.prefill_masked_bucket(toks, page_table, actual_len=actual_len, bucket=bucket)
         # Fill-width-keyed programs: warm every width directly (no full forward).
         self._warmup_paged_fill_widths(page_table, buckets, block_size)
         ttnn.synchronize_device(self.device)
@@ -2325,9 +2332,9 @@ class Qwen36Model:
         blocks_per_chunk = chunk_size // block_size
         num_full = actual_len // chunk_size
         tail_real = actual_len - num_full * chunk_size
-        assert num_full == 0 or self.tp_path or self._chunked_trace_id is not None, (
-            "Call capture_prefill_trace_chunked first"
-        )
+        assert (
+            num_full == 0 or self.tp_path or self._chunked_trace_id is not None
+        ), "Call capture_prefill_trace_chunked first"
 
         # Stage the per-request RoPE once for the whole prompt (M-RoPE for multimodal, 1D for text).
         # The chunk-replay loops + the masked tail then slice this sequence-indexed table by chunk
@@ -2765,6 +2772,8 @@ class Qwen36Model:
         if getattr(self, "_chunked_trace_id", None) is not None:
             ttnn.release_trace(self.device, self._chunked_trace_id)
             self._chunked_trace_id = None
+        if self.mtp is not None:
+            self.mtp.free_kv_caches()
         for rec, conv in self._deltanet_external_states:
             ttnn.deallocate(rec)
             ttnn.deallocate(conv)
@@ -2798,6 +2807,8 @@ class Qwen36Model:
                 layer.attention._stable_state = True
         # Marker for re-entry assert; TP GDN state lives in module, not external buffers.
         self._deltanet_external_states = []
+        if self.mtp is not None:
+            self.mtp.allocate_kv_caches(tuple(kv_cache_shape))
         return kv_caches
 
     def _prefill_paged_tp(self, token_ids, page_table, valid_len=None, vision_tokens=None, gdn_collect=False):

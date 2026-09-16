@@ -7,6 +7,7 @@ hub ids are snapshot_download'd first (AutoConfig on bare hub id is unreliable h
 Qwen3.5-specific params (GDN, partial RoPE, layer types) come from HF text config.
 load_state_dict/weight_cache_path override the base meta-key (wq/wk/wv) scheme.
 """
+
 import os
 from pathlib import Path
 
@@ -27,6 +28,7 @@ class Qwen36ModelArgs(ModelArgs):
         mesh_device=None,
         max_batch_size=1,
         max_seq_len=2048,
+        force_tp=False,
         **kwargs,
     ):
         # HF_MODEL is canonical (defaults to Qwen/Qwen3.6-27B). Snapshot hub ids unless
@@ -95,13 +97,11 @@ class Qwen36ModelArgs(ModelArgs):
             self.weight_dtype = None
             self.act_dtype = None
 
-        # Sharded-module path. Selected by device count OR by batch: the TP modules carry the
-        # per-slot GDN state, per-user rope, slot prefill and bucketed decode traces that continuous
-        # batching needs, and every collective they issue is a no-op on a (1,1) mesh
-        # (tt_all_reduce returns its input; the fused AG/RS matmuls are gated below). The
-        # single-device modules stay the B=1 path. Shard math still divides by num_devices.
+        # TP modules supply per-slot GDN state and request-specific rope/prefill/decode.
+        # Their collectives are no-ops on (1,1). MTP selects them explicitly even for B=1;
+        # otherwise single-device B=1 retains the original path. Shard math divides by num_devices.
         self.num_devices = mesh_device.get_num_devices() if mesh_device is not None else 1
-        self.tp_path = self.num_devices > 1 or max_batch_size > 1
+        self.tp_path = force_tp or self.num_devices > 1 or max_batch_size > 1
         if mesh_device is not None and self.tp_path:
             self._init_tp_config(mesh_device)
 
