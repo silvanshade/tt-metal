@@ -74,8 +74,12 @@ Optional flags:
 ```bash
 # Run SDPA in BF8 (faster; slightly lower precision).
 export QWEN_SDPA_BF8=1
+
+# Q/K Hadamard rotation is enabled by default. Disable only at model startup.
+export QWEN_QK_HADAMARD=0
 ```
 
+`QWEN_QK_HADAMARD` is read once when `Qwen36Model` is constructed (`1` by default). The model shares the selected operation with its attention layers and MTP draft. Disabling it leaves Q and K unchanged without allocating a rotation matrix; V is unchanged in either mode. Restart with fresh KV caches and recapture traces when changing the setting: cached keys and queries must use the same basis. Changing the environment after construction does not change an existing model.
 
 ## End-to-end demo test (`demo/text_demo.py`)
 

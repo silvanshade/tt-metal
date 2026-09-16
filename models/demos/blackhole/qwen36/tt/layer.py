@@ -22,7 +22,7 @@ class Qwen36DecoderLayer:
     Attention is either GatedAttention (full, with RoPE) or GatedDeltaNet (linear).
     """
 
-    def __init__(self, mesh_device, args, state_dict, layer_num, tensor_cache_path=None, tt_ccl=None):
+    def __init__(self, mesh_device, args, state_dict, layer_num, tensor_cache_path=None, tt_ccl=None, qk_rotation=None):
         self.layer_num = layer_num
         self.device = mesh_device
         self.args = args
@@ -90,7 +90,7 @@ class Qwen36DecoderLayer:
                 tw = load_attention_weights_tp(
                     mesh_device, substate(state_dict, f"layers.{layer_num}.self_attn"), args, cache_dir=tp_cache
                 )
-                self.attention = TPAttention(mesh_device, args, tw, tt_ccl)
+                self.attention = TPAttention(mesh_device, args, tw, tt_ccl, qk_rotation=qk_rotation)
             else:
                 from models.demos.blackhole.qwen36.tt.gdn.tp import TPGatedDeltaNet, load_gdn_weights_tp
 
@@ -101,7 +101,9 @@ class Qwen36DecoderLayer:
         elif self.is_full_attention:
             attn_state = substate(state_dict, f"layers.{layer_num}.self_attn")
             attn_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
-            self.attention = Qwen36GatedAttention(mesh_device, AttentionConfig.from_args(args), attn_state, attn_cache)
+            self.attention = Qwen36GatedAttention(
+                mesh_device, AttentionConfig.from_args(args), attn_state, attn_cache, qk_rotation=qk_rotation
+            )
         else:
             gdn_state = substate(state_dict, f"layers.{layer_num}.linear_attn")
             gdn_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
