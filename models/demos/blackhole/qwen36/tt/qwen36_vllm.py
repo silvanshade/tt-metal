@@ -11,6 +11,7 @@ model-bound, so the kv_cache contract param is accepted but unused.
 import math
 import os
 from collections import defaultdict
+from contextlib import nullcontext
 from typing import Mapping, Optional
 
 import torch
@@ -263,9 +264,10 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         # a fixed-shape ttnn.where over hidden-sharded persistent buffers (the vision rows are
         # gathered to full hidden on host, placed along seq, then re-sharded), so no request-time
         # compile clobbers the parked trace.
-        logits = model.prefill_traced_chunked(
-            tokens, page_table, actual_len=T, vision_tokens=vision_tokens
-        )  # [1,1,vocab] replicated
+        with model.mtp.prefill_request(tokens, 0) if model.mtp else nullcontext():
+            logits = model.prefill_traced_chunked(
+                tokens, page_table, actual_len=T, vision_tokens=vision_tokens
+            )  # [1,1,vocab] replicated
         logits = (
             ttnn.to_torch(logits, mesh_composer=ttnn.ConcatMeshToTensor(model.mesh_device, dim=0))
             .reshape(-1, model.args.vocab_size)[:1]
@@ -381,6 +383,10 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         """
         if enable_trace and getattr(self, "already_warmed_up_prefill", False):
             return
+        if enable_trace:
+            # Phase 1 must cover every program before either serving trace is parked.
+            self.mesh_device.enable_program_cache()
+            self.mesh_device.set_program_cache_misses_allowed(False)
         # Size the chunk-trace page table to the full KV cache (not a hardcoded 4096) so served ISL
         # isn't capped; still captures one chunk — just a bigger page-table tensor.
         if kv_cache:
@@ -406,9 +412,24 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
             model.capture_prefill_trace_chunked(
                 self.mesh_device, page_table, chunk_size=_PREFILL_WARMUP_CHUNK, capture_chunk_trace=enable_trace
             )
+            if batched and not enable_trace:
+                composer = ttnn.ConcatMeshToTensor(self.mesh_device, dim=0)
+                dn_layers = [layer.attention for layer in model.layers if not layer.is_full_attention]
+                rec_snap = [ttnn.to_torch(dn.rec_state, mesh_composer=composer) for dn in dn_layers]
+                conv_snap = [[ttnn.to_torch(c, mesh_composer=composer) for c in dn.conv_states] for dn in dn_layers]
         finally:
             if prev is not None:
                 model._unbind_gdn_prefill_scratch(prev)
+        if not enable_trace:
+            grid = self.mesh_device.compute_with_storage_grid_size()
+            logger.info("Qwen warmup effective compute grid: {}x{}", grid.x, grid.y)
+        if batched and not enable_trace:
+            # Exercise the request-time upload and slot update, not a shape-only substitute.
+            for slot in range(model.args.max_batch_size):
+                model._write_gdn_slot(slot, rec_snap, conv_snap)
+            # One permutation reads every source row and compiles the fixed-width gather.
+            model._remap_gdn_slots(list(range(1, model.args.max_batch_size)) + [0])
+            ttnn.synchronize_device(self.mesh_device)
         if enable_trace:
             self.already_warmed_up_prefill = True
 
@@ -417,4 +438,8 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         # Drop stale `non_greedy_decoding_on_device` from the old vLLM plugin; no-op for Qwen.
         kwargs.pop("non_greedy_decoding_on_device", None)
         self._validate_device_sampling_request(kwargs.get("can_sample_on_device", False))
+        enable_trace = kwargs.get("enable_trace", args[1] if len(args) > 1 else False)
+        if enable_trace:
+            self.mesh_device.enable_program_cache()
+            self.mesh_device.set_program_cache_misses_allowed(False)
         return warmup_decode_buckets(self, super().warmup_model_decode, *args, **kwargs)

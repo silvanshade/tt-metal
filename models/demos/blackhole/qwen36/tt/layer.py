@@ -10,6 +10,7 @@ import ttnn
 from models.common.rmsnorm import RMSNorm
 from models.demos.blackhole.qwen36.tt.attention import AttentionConfig, Qwen36GatedAttention
 from models.demos.blackhole.qwen36.tt.gdn import GDNConfig, Qwen36GatedDeltaNet
+from models.demos.blackhole.qwen36.tt.gdn.verification import GDNVerification
 from models.demos.blackhole.qwen36.tt.mlp import Qwen36MLP
 from models.demos.blackhole.qwen36.utils.substate import substate
 from models.tt_transformers.tt.common import Mode
@@ -169,7 +170,9 @@ class Qwen36DecoderLayer:
         chunk_start_idx_tensor=None,
         valid_len=None,
         gdn_collect=False,
+        gdn_verification: GDNVerification | None = None,
     ):
+        assert mode != "verify" or self.tp_path, "MTP verification requires TP modules"
         _norm_mode = Mode.PREFILL if mode == "prefill" else Mode.DECODE
         if self.tp_path:
             # TP: DistributedNorm uses the framework's per-norm memory configs.
@@ -211,6 +214,8 @@ class Qwen36DecoderLayer:
                         )
                     else:
                         attn_output = self.attention.forward_prefill(attn_input, cos, sin)
+                elif mode == "verify":
+                    attn_output = self.attention.forward_verify(attn_input, position_tensor, cos, sin, page_table)
                 else:
                     attn_output = self.attention.forward_decode(
                         attn_input, position_tensor, cos, sin, page_table=page_table
@@ -229,6 +234,9 @@ class Qwen36DecoderLayer:
                         attn_output = self.attention.forward_prefill(
                             attn_input, chunk_size=chunk_size, valid_len=valid_len, capture_state=True
                         )
+                elif mode == "verify":
+                    assert gdn_verification is not None and gdn_verification.layer is self.attention
+                    attn_output = gdn_verification.verify_prepared(attn_input)
                 else:
                     attn_output = self.attention.forward_decode(attn_input)
         elif self.is_full_attention:
