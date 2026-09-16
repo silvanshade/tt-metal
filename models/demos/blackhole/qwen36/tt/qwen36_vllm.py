@@ -134,8 +134,15 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
             # reads the cached refs instead of reaching the HF API (refused by HF_HUB_OFFLINE=1).
             offline = os.getenv("HF_HUB_OFFLINE") == "1" or os.getenv("CI") == "true"
             name_or_path = snapshot_download(name_or_path, local_files_only=offline)
+        # The framework accepts power-of-two batches only (tt_transformers model_config
+        # supported_batches); vLLM's max_num_seqs is any integer. Size the slots at the next power
+        # of two: decode bucketing already slices the active prefix to that width, and the extra
+        # slots cost only their GDN state rows (~1.5 MB each per layer).
+        model_batch = 1 << (int(max_batch_size) - 1).bit_length() if max_batch_size > 1 else 1
+        if model_batch != max_batch_size:
+            logger.info(f"Rounding max_batch_size {max_batch_size} up to {model_batch} (power-of-two slot count)")
         args, model, _ = create_tt_model(
-            mesh_device, max_batch_size=max_batch_size, max_seq_len=max_seq_len, hf_model=name_or_path
+            mesh_device, max_batch_size=model_batch, max_seq_len=max_seq_len, hf_model=name_or_path
         )
         # Attach the TT vision tower so prefill can splice image/video embeddings (multimodal path).
         # No-op cost for text-only requests; get_image_features / get_video_features are only invoked
@@ -203,7 +210,7 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
     def prefill_forward(self, tokens, page_table, kv_cache, prompt_lens, **kwargs):
         """All prefill is model-owned (Generator drives decode only)."""
         model = self.model[0]
-        if model.num_devices > 1 and model.args.max_batch_size > 1:
+        if model.tp_path and model.args.max_batch_size > 1:
             # Batched text prefill into decode slots (MM is B=1). Require real visual data, not a
             # non-None empty pixel_values placeholder from vLLM on text requests.
             assert not self._has_visual(kwargs, "pixel_values") and not self._has_visual(
@@ -214,7 +221,7 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
             )
             return self._prefill_forward_tp_batched(model, tokens, page_table, prompt_lens, kwargs.get("empty_slots"))
         vision_tokens = self._compute_vision_tokens(model, kwargs)
-        if model.num_devices > 1:
+        if model.tp_path:
             return self._prefill_forward_tp(model, tokens, page_table, prompt_lens, vision_tokens=vision_tokens)
         seq_len = int(prompt_lens[0]) if prompt_lens is not None else tokens.shape[1]
         logger.info(f"Prefilling User 1 up to {seq_len} tokens")
@@ -305,7 +312,7 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         # BEFORE the decode trace reads it. The plugin remaps its own buffers (and the seed RNG via
         # super().decode_forward), but GDN state is model-internal, so mirror the same reindex here.
         # slot_remap is passed through unchanged so the seed-RNG remap inside super() still runs.
-        if model.num_devices > 1 and model.args.max_batch_size > 1:
+        if model.tp_path and model.args.max_batch_size > 1:
             slot_remap = kwargs.get("slot_remap")
             if slot_remap is not None:
                 model._remap_gdn_slots(slot_remap)
@@ -363,13 +370,17 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         return super().decode_forward(*args, **kwargs)
 
     def warmup_model_prefill(self, kv_cache, enable_trace, *args, **kwargs):
-        # Capture the chunk-prefill trace + warm the masked-bucket set so requests only replay
-        # pre-compiled programs (compile-clobbers-trace fix). Guard name must match the plugin's reset.
-        if not enable_trace:
+        """Warm the prefill program set; with enable_trace, also capture the chunk-prefill trace.
+
+        The vLLM runner calls this twice: once untraced (its compile phase, before any trace is
+        parked) and once traced. Both must run the same forward under the same GDN binding, because
+        a ttnn program compiled after a trace is parked can clobber that trace's buffers (the
+        post-park hang, tenstorrent/tt-metal#48536): every program the capture replays has to be
+        in the cache before the decode trace exists, so the untraced call is where the compile
+        happens and the traced call only captures. The guard covers the capture alone.
+        """
+        if enable_trace and getattr(self, "already_warmed_up_prefill", False):
             return
-        if getattr(self, "already_warmed_up_prefill", False):
-            return
-        self.already_warmed_up_prefill = True
         # Size the chunk-trace page table to the full KV cache (not a hardcoded 4096) so served ISL
         # isn't capped; still captures one chunk — just a bigger page-table tensor.
         if kv_cache:
@@ -384,19 +395,22 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         # (>chunk_size) replay the traced chunk-outer path per user instead of the slower eager fallback.
         # The scratch is not freed (prefill_paged_slots rebinds it per request); the batched decode
         # buffers are restored before the decode-trace warmup captures at [B,...].
-        batched = model.num_devices > 1 and model.args.max_batch_size > 1
+        batched = model.tp_path and model.args.max_batch_size > 1
         logger.info(
-            f"Starting Qwen prefill warmup: chunk-prefill trace{' (batched, B=1 scratch)' if batched else ''} "
+            f"Starting Qwen prefill warmup: chunk-prefill {'trace' if enable_trace else 'compile'}"
+            f"{' (batched, B=1 scratch)' if batched else ''} "
             f"(chunk={_PREFILL_WARMUP_CHUNK}, page_table_blocks={num_blocks})..."
         )
         prev = model._bind_gdn_prefill_scratch() if batched else None
         try:
             model.capture_prefill_trace_chunked(
-                self.mesh_device, page_table, chunk_size=_PREFILL_WARMUP_CHUNK, capture_chunk_trace=True
+                self.mesh_device, page_table, chunk_size=_PREFILL_WARMUP_CHUNK, capture_chunk_trace=enable_trace
             )
         finally:
             if prev is not None:
                 model._unbind_gdn_prefill_scratch(prev)
+        if enable_trace:
+            self.already_warmed_up_prefill = True
 
     def warmup_model_decode(self, *args, **kwargs):
         # Defer to WarmupForwardMixin, which warms the paged-SDPA + GDN decode path at pos 0.
