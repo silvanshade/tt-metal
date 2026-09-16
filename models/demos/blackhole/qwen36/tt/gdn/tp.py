@@ -179,7 +179,7 @@ class TPGatedDeltaNet:
         self.value_dim_tp = args.gdn_value_dim_tp
         # Flat q/k/v into adapter (skips prefill head-split reshapes)
         self._gdn_flat_qkv = True
-        # Fuse adapter output relayout with rms_norm + head-flatten
+        # Fuse adapter output relayout with rms_norm + head-flatten (set with _prefill_fits_l1 below).
         self._gdn_fuse_out = True
         self.K = args.gdn_conv_kernel_size
         self.scale = self.Dk**-0.5
@@ -189,7 +189,9 @@ class TPGatedDeltaNet:
         self._fuse_ab = self._dram_sharded
         # Fuse prefill norm-allgather + qkvzab in-proj into all_gather_minimal_matmul_async.
         # Requires the folded qkvzab weight; norm's post-AG is disabled in layer.py (GDN, prefill).
-        self._fuse_agmm = self._fuse_ab
+        # Mesh-only: the fused op is a collective, and the (1,1)-mesh batching path (args.tp_path
+        # without devices) runs the plain matmul instead. Must match layer._fuse_norm_agmm.
+        self._fuse_agmm = self._fuse_ab and args.num_devices > 1
         # PREFILL out-proj fusion (matmul_reduce_scatter, (8,8) grid). Slight TTFT cost at small ISL
         # (~13k crossover from a fixed warmup/compile overhead) but a large win at long ISL (e.g.
         # 128k ~-2s); overlaps the fp32 GDN-out reduce-scatter with the matmul.
@@ -205,9 +207,17 @@ class TPGatedDeltaNet:
         # In-place state updates for decode/prefill traces (set by model allocate_kv_caches)
         self._stable_state = False
         self.conv_carry = None  # cross-chunk prefill conv carry [1, K-1, qkv_dim_tp]
-        # Native ttnn.conv1d depthwise prefill; L1_FULL slice keeps it trace-safe.
-        # Only used when valid_len is None (masked buckets keep the MAC FIR).
-        self._gdn_conv1d = True
+        # Whether one chunk of this layer's per-device activations fits worker L1: the
+        # [2048 + K-1, qkv_dim_tp] bf16 conv input sharded over the 33-core conv grid, under the
+        # ~830 KB the allocator has free beside the resident projections. True at TP>=2 (509 KB at
+        # TP=4), false at TP=1 (2 MB: the full 16384-wide row set is 43 MB). Decides three things
+        # in forward_prefill: the native ttnn.conv1d (height-shards that input into L1; the MAC FIR
+        # runs otherwise), and the L1 placement of the qkvzab projection and the norm/relayout
+        # output, which are ~42 MB and 12 MB at full width.
+        self._prefill_fits_l1 = (2048 + self.K - 1) * self.qkv_dim_tp * 2 // 33 <= 800_000
+        # nlp_concat_heads sizes its static CBs by the [Nv, T, Dv] block; at full width (Nv=48,
+        # T=2048) they exceed L1 on their own, so the wide path keeps the plain norm + reshape.
+        self._gdn_fuse_out = self._gdn_fuse_out and self._prefill_fits_l1
         self._conv1d_wprep = None  # prepared depthwise weight (populated on first prefill call)
         # Persistent zero sources for trace-safe reset_state_inplace (alloc before any trace)
         self._zero_conv0 = None
@@ -487,12 +497,16 @@ class TPGatedDeltaNet:
         if carry and self.conv_carry is None:
             self.reset_state()
 
-        # Prefill qkvzab in L1: keeps proj + q/k/v/z/a/b resident for conv+gate prep.
-        qkv, z, a, b = self._project_qkvzab(x, T, out_mc=ttnn.L1_MEMORY_CONFIG)
+        # Prefill qkvzab in L1: keeps proj + q/k/v/z/a/b resident for conv+gate prep. Sized for the
+        # per-device width: at TP=1 the [chunk, 16384] projection and its conv output are ~42 MB
+        # each and do not fit L1 beside each other, so both go to DRAM (the single-device model's
+        # own placement for this layer).
+        _wide_mc = ttnn.L1_MEMORY_CONFIG if self._prefill_fits_l1 else ttnn.DRAM_MEMORY_CONFIG
+        qkv, z, a, b = self._project_qkvzab(x, T, out_mc=_wide_mc)
 
         # FIR conv1d; conv_state = previous chunk's last K-1 inputs (None/zero from scratch)
         _cstate = self.conv_carry if carry else None
-        if self._gdn_conv1d and valid_len is None:
+        if self._prefill_fits_l1 and valid_len is None:
             # Native depthwise ttnn.conv1d (masked buckets keep the MAC FIR: valid_len new_state differs)
             conv, conv_new_state = self._conv1d_prefill(qkv, T, _cstate)
         else:
@@ -503,7 +517,7 @@ class TPGatedDeltaNet:
                 self.K,
                 self.mesh,
                 # Conv in L1 (output freed before chunk kernel; new_state lands in DRAM internally)
-                memory_config=ttnn.L1_MEMORY_CONFIG,
+                memory_config=_wide_mc,
                 conv_state=_cstate,
                 weight_taps=tw["conv_taps"],
                 bias_dev=None,
@@ -595,8 +609,9 @@ class TPGatedDeltaNet:
                     src = ttnn.reshape(ttnn.slice(conv_new_state, (0, j, 0), (1, j + 1, D)), (1, B, D))
                     ttnn.copy(src, self.conv_states[j + 1])
             ttnn.deallocate(conv_new_state)
-        # Gated RMSNorm + SiLU(z); norm/flatten in L1, gated output in DRAM for out-proj
-        _L1 = ttnn.L1_MEMORY_CONFIG
+        # Gated RMSNorm + SiLU(z); norm/flatten in L1, gated output in DRAM for out-proj. At TP=1
+        # the [Nv, T, Dv] output (12 MB at Nv=48) does not fit L1 beside the relayout's CBs: DRAM.
+        _L1 = ttnn.L1_MEMORY_CONFIG if self._prefill_fits_l1 else ttnn.DRAM_MEMORY_CONFIG
         if self._gdn_fuse_out:
             # Fuse adapter relayout with per-head rms_norm + head-flatten.
             # TILE-native head->token relayout (transpose + fold), dropping the
@@ -833,7 +848,9 @@ class TPGatedDeltaNet:
         seed_manager.apply_slot_remap for GDN's per-slot recurrent+conv state, which the plugin's
         slot_remap does not itself move. In-place copy into the fixed buffers (preserves the decode
         trace's baked addresses)."""
-        idx = [int(remap[i]) for i in range(self.B)]
+        # The plugin's remap is max_num_seqs wide; the slot count is that rounded up to a power of
+        # two (initialize_vllm_model), so slots past the remap are never scheduled and stay put.
+        idx = [int(remap[i]) if i < len(remap) else i for i in range(self.B)]
         if all(idx[i] == i for i in range(self.B)):
             return
         self._gather_indices(self.rec_state, idx, dim=0)
