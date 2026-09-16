@@ -40,6 +40,24 @@ class GDNVerification:
         update_dtype = ttnn.bfloat16 if os.environ.get("QWEN35_GDN_DECODE_BF16") == "1" else ttnn.float32
         shapes = ((1, layer.Nv, layer.Dk), (1, layer.Nv, layer.Dv), (1, layer.Nv, 1, 1), (1, layer.Nv))
         self.updates = [tuple(self._allocate(shape, update_dtype) for shape in shapes) for _ in range(max_tokens)]
+        self._released = False
+
+    def release(self) -> None:
+        """Discard scratch and tapes without committing pending speculative state.
+
+        requires: no live trace references these buffers; no concurrent verification.
+        ensures: committed layer state survives; repeated release is harmless.
+        """
+        if self._released:
+            return
+        for tensor in (self.checkpoint, self.scratch):
+            ttnn.deallocate(tensor)
+        for tensors in (self.checkpoint_convs, self.scratch_convs, self.conv_inputs, *self.updates):
+            for tensor in tensors:
+                ttnn.deallocate(tensor)
+        self._released = True
+        self.count = 0
+        self.slot = -1
 
     def _allocate(self, shape: tuple[int, ...], dtype: ttnn.DataType) -> ttnn.Tensor:
         """Allocate persistent replicated local-shard storage before capture."""
@@ -78,6 +96,7 @@ class GDNVerification:
         ensures: scratch starts at the selected checkpoint; committed state unchanged.
         """
         layer = self.layer
+        assert not self._released
         assert self.count == 0 and 0 <= slot < layer.B
         assert layer.rec_state is not None and layer.conv_states is not None and layer._stable_state
         self.slot = slot
