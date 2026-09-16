@@ -8,28 +8,78 @@ pass through unchanged. The gated attention TTNN op handles the partial
 application internally — we just need to generate cos/sin for the rotary
 portion (head_dim=64).
 """
+import math
+
 import torch
 
 import ttnn
 
 
-def compute_rope_freqs(head_dim: int, max_seq_len: int, theta: float = 10_000_000.0):
+def rope_inv_freq(head_dim: int, theta: float, rope_scaling: dict | None = None):
+    """Inverse frequencies [head_dim // 2] and the cos/sin scale for the configured rope type.
+
+    ``rope_scaling`` is the HF ``rope_parameters`` dict. ``rope_type`` "default" (or None) is plain
+    RoPE with scale 1.0. "yarn" follows transformers' ``_compute_yarn_parameters``: bands rotating
+    fewer than ``beta_slow`` times over ``original_max_position_embeddings`` are interpolated by
+    ``factor``, bands rotating more than ``beta_fast`` times are kept, and the bands between are
+    blended linearly; cos and sin are then scaled by ``attention_factor`` (``0.1 ln(factor) + 1``
+    unless the config gives one). Decode positions past the original window are then in range of
+    the trained frequencies, which is what lets a 262K-trained checkpoint serve 524K.
+    """
+    pos_freqs = theta ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+    rope_type = (rope_scaling or {}).get("rope_type", "default")
+    if rope_type == "default":
+        return 1.0 / pos_freqs, 1.0
+    if rope_type != "yarn":
+        raise ValueError(f"unsupported rope_type {rope_type!r}; Qwen3.6 supports 'default' and 'yarn'")
+
+    factor = float(rope_scaling["factor"])
+    original_max = int(rope_scaling["original_max_position_embeddings"])
+    beta_fast = float(rope_scaling.get("beta_fast") or 32)
+    beta_slow = float(rope_scaling.get("beta_slow") or 1)
+    truncate = rope_scaling.get("truncate", True)
+
+    def mscale(scale, m=1.0):
+        return 1.0 if scale <= 1 else 0.1 * m * math.log(scale) + 1.0
+
+    attention_factor = rope_scaling.get("attention_factor")
+    if attention_factor is None:
+        m, m_all = rope_scaling.get("mscale"), rope_scaling.get("mscale_all_dim")
+        attention_factor = mscale(factor, m) / mscale(factor, m_all) if m and m_all else mscale(factor)
+
+    def correction_dim(num_rotations):
+        return (head_dim * math.log(original_max / (num_rotations * 2 * math.pi))) / (2 * math.log(theta))
+
+    low, high = correction_dim(beta_fast), correction_dim(beta_slow)
+    if truncate:
+        low, high = math.floor(low), math.ceil(high)
+    low, high = max(low, 0), min(high, head_dim - 1)
+    if low == high:
+        high += 0.001
+    ramp = torch.clamp((torch.arange(head_dim // 2, dtype=torch.float32) - low) / (high - low), 0, 1)
+    extrapolation = 1.0 - ramp
+    inv_freq = (1.0 / (factor * pos_freqs)) * (1.0 - extrapolation) + (1.0 / pos_freqs) * extrapolation
+    return inv_freq, float(attention_factor)
+
+
+def compute_rope_freqs(head_dim: int, max_seq_len: int, theta: float = 10_000_000.0, rope_scaling: dict | None = None):
     """Compute RoPE frequency tensors (cos, sin) for given head_dim.
 
     Args:
         head_dim: Dimension of the rotary portion (64 for Qwen3.5).
         max_seq_len: Maximum sequence length to precompute.
         theta: RoPE base frequency.
+        rope_scaling: HF ``rope_parameters`` (see ``rope_inv_freq``); None is plain RoPE.
 
     Returns:
         cos: torch.Tensor [max_seq_len, head_dim]
         sin: torch.Tensor [max_seq_len, head_dim]
     """
-    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))
+    freqs, scale = rope_inv_freq(head_dim, theta, rope_scaling)
     positions = torch.arange(max_seq_len, dtype=torch.float32)
     angles = torch.outer(positions, freqs)  # [max_seq_len, head_dim // 2]
-    cos = torch.cat([torch.cos(angles), torch.cos(angles)], dim=-1)  # [max_seq_len, head_dim]
-    sin = torch.cat([torch.sin(angles), torch.sin(angles)], dim=-1)  # [max_seq_len, head_dim]
+    cos = torch.cat([torch.cos(angles), torch.cos(angles)], dim=-1) * scale  # [max_seq_len, head_dim]
+    sin = torch.cat([torch.sin(angles), torch.sin(angles)], dim=-1) * scale  # [max_seq_len, head_dim]
     return cos, sin
 
 
@@ -46,11 +96,13 @@ class Qwen36RoPESetup:
         self.head_dim = args.rope_head_dim  # 64
         self.max_seq_len = args.max_seq_len
         self.theta = args.rope_theta
+        self.rope_scaling = args.rope_scaling_params
 
         self.cos_cpu, self.sin_cpu = compute_rope_freqs(
             head_dim=self.head_dim,
             max_seq_len=self.max_seq_len,
             theta=args.rope_theta,
+            rope_scaling=self.rope_scaling,
         )
 
         # --- M-RoPE (multimodal rotary) per-request state -------------------------------------
@@ -61,11 +113,10 @@ class Qwen36RoPESetup:
         # the prefill helpers fall back to ordinary 1D RoPE — byte-identical to the pre-M-RoPE path.
         # Decode stays on the absolute tables, offset by rope_delta (post-image text has t==h==w).
         self.mrope_section = list(args.mrope_section)
-        self.attention_scaling = args.rope_attention_scaling
         self.spatial_merge_size = args.spatial_merge_size
         self.image_token_id = args.image_token_id
         self.video_token_id = args.video_token_id
-        self.inv_freq = 1.0 / (self.theta ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32) / self.head_dim))
+        self.inv_freq, self.attention_scaling = rope_inv_freq(self.head_dim, self.theta, self.rope_scaling)
         self._req_cos = None  # [S, head_dim] bf16, sequence-indexed M-RoPE cos (None => text)
         self._req_sin = None
         self.rope_delta = 0  # mrope_position_delta: decode rope_pos = kv_pos + rope_delta
@@ -200,8 +251,8 @@ class Qwen36RoPESetup:
             return
         pos = torch.arange(cur, length, dtype=torch.float32) + self.rope_delta
         emb = torch.cat([torch.outer(pos, self.inv_freq)] * 2, dim=-1)
-        self._req_cos = torch.cat([self._req_cos, emb.cos().to(torch.bfloat16)], dim=0)
-        self._req_sin = torch.cat([self._req_sin, emb.sin().to(torch.bfloat16)], dim=0)
+        self._req_cos = torch.cat([self._req_cos, (emb.cos() * self.attention_scaling).to(torch.bfloat16)], dim=0)
+        self._req_sin = torch.cat([self._req_sin, (emb.sin() * self.attention_scaling).to(torch.bfloat16)], dim=0)
 
     def prefill_cos_sin_torch(self, start, length):
         """Torch bf16 cos/sin [length, head_dim] for SEQUENCE positions [start, start+length).
@@ -215,7 +266,9 @@ class Qwen36RoPESetup:
             return self._req_cos[start:end], self._req_sin[start:end]
         t = torch.arange(start, start + length, dtype=torch.float32)
         emb = torch.cat([torch.outer(t, self.inv_freq)] * 2, dim=-1)
-        return emb.cos().to(torch.bfloat16), emb.sin().to(torch.bfloat16)
+        return (emb.cos() * self.attention_scaling).to(torch.bfloat16), (emb.sin() * self.attention_scaling).to(
+            torch.bfloat16
+        )
 
     def get_prefill_rot_mats(self, start, length):
         """ttnn cos/sin [1, length, head_dim] (replicated) for SEQUENCE positions [start, start+length),
