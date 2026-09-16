@@ -2381,7 +2381,13 @@ class Qwen36Model:
         pt_host = ttnn.from_torch(page_table, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT)
         ttnn.copy_host_to_device_tensor(pt_host, self._chunk_full_page_table_buf)
 
-        # Replay trace for each full chunk.
+        # Replay trace for each full chunk. With QWEN36_CHUNK_PROGRESS (default on) each replay
+        # blocks and logs a progress line, so a long prompt (266K = ~130 chunks, ~15 min) reports
+        # progress instead of parking the host in one synchronize_device for the whole prefill and
+        # looking like a wedge to an external watchdog. The copies are on the same command queue
+        # either way; the cost of blocking is the ~ms of host prep that no longer overlaps the
+        # device per chunk. Set QWEN36_CHUNK_PROGRESS=0 for the fully queued replay.
+        progress = os.environ.get("QWEN36_CHUNK_PROGRESS", "1") != "0"
         for c in range(num_full):
             cs = c * chunk_size
             tok_host = ttnn.from_torch(
@@ -2428,9 +2434,12 @@ class Qwen36Model:
                 token_ids[:, cs : cs + chunk_size], vision_tokens, self._vis_row_offset_for(token_ids, cs)
             )
 
-            ttnn.execute_trace(self.device, self._chunked_trace_id, cq_id=0, blocking=False)
+            ttnn.execute_trace(self.device, self._chunked_trace_id, cq_id=0, blocking=progress)
+            if progress:
+                logger.info(f"Chunked prefill {c + 1}/{num_full} ({cs + chunk_size}/{actual_len} tokens)")
 
-        ttnn.synchronize_device(self.device)
+        if not progress:
+            ttnn.synchronize_device(self.device)
 
         # Tail via masked bucket (or last full chunk hidden if exact multiple of chunk_size).
         if tail_real > 0:
