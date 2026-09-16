@@ -649,6 +649,7 @@ class Qwen36Model:
             self.args.max_seq_len,
             self.args.rope_theta,
             torch.tensor([pos + self.rope.rope_delta], dtype=torch.int32),
+            rope_scaling=self.args.rope_scaling_params,
         )
         cur_pos_tt = ttnn.from_torch(
             torch.tensor([pos], dtype=torch.int32),
@@ -3217,11 +3218,10 @@ class Qwen36Model:
         if self.num_devices > 1:
             # TP: rope_tp cos/sin [1,B,1,rope_dim] packed on host.
             rd = self.args.rope_head_dim
-            inv_freq = 1.0 / (self.args.rope_theta ** (torch.arange(0, rd, 2).float() / rd))
-            freqs = torch.outer(rope_pos_vec.float(), inv_freq)  # [B, rd/2], per-user rotation
+            freqs = torch.outer(rope_pos_vec.float(), self.rope.inv_freq)  # [B, rd/2], per-user rotation
             emb = torch.cat([freqs, freqs], dim=-1)
-            cos = emb.cos().reshape(1, B, 1, rd).to(torch.bfloat16)
-            sin = emb.sin().reshape(1, B, 1, rd).to(torch.bfloat16)
+            cos = (emb.cos() * self.rope.attention_scaling).reshape(1, B, 1, rd).to(torch.bfloat16)
+            sin = (emb.sin() * self.rope.attention_scaling).reshape(1, B, 1, rd).to(torch.bfloat16)
             rope_packed = ttnn.from_torch(torch.cat([cos, sin], dim=0), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
         else:
             # Single-device decode is B=1 in this port; per-user single-device rope is out of scope.
