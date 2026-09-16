@@ -8,6 +8,7 @@ Hybrid state: KV cache (8 attn layers) + recurrent state (24 DeltaNet layers).
 
 import math
 import os
+from contextlib import nullcontext
 
 import torch
 from loguru import logger
@@ -27,6 +28,7 @@ class Qwen36Model:
 
     def __init__(self, mesh_device, args, state_dict, tensor_cache_path=None):
         self.args = args
+        self.mtp = None
         self.device = mesh_device
         self.mesh_device = mesh_device  # Generator reads model.mesh_device
         self.num_devices = mesh_device.get_num_devices()
@@ -565,9 +567,9 @@ class Qwen36Model:
         if layer_indices is not None:
             layer_indices = list(layer_indices)
             assert layer_indices, "layer_indices must be non-empty"
-            assert all(
-                0 <= i < len(args.attention_type_list) for i in layer_indices
-            ), f"layer_indices {layer_indices} out of range [0, {len(args.attention_type_list)})"
+            assert all(0 <= i < len(args.attention_type_list) for i in layer_indices), (
+                f"layer_indices {layer_indices} out of range [0, {len(args.attention_type_list)})"
+            )
             args.layer_indices = layer_indices
             args.n_layers = len(layer_indices)
         elif n_layers is not None:
@@ -744,9 +746,9 @@ class Qwen36Model:
         n = int(pos.numel())
         if n == 0:
             return x
-        assert n == int(
-            vision_tokens.shape[0]
-        ), f"input_ids has {n} image-token positions but vision_tokens has {int(vision_tokens.shape[0])} rows"
+        assert n == int(vision_tokens.shape[0]), (
+            f"input_ids has {n} image-token positions but vision_tokens has {int(vision_tokens.shape[0])} rows"
+        )
 
         # Placement index: the dim-0 rows of the flattened [rows, H] embedding to fill,
         # repeated across the hidden dim so the whole hidden vector at each row is written.
@@ -1152,6 +1154,8 @@ class Qwen36Model:
 
         # Capture trace.
         self._reset_dn_state_inplace()
+        if not capture_chunk_trace:
+            return
         self._chunked_trace_id = ttnn.begin_trace_capture(device, cq_id=0)
         self._chunked_trace_output = self._forward_prefill_chunk(
             self._chunk_token_buf,
@@ -1176,6 +1180,12 @@ class Qwen36Model:
         block_size = get_block_size(self._paged_kv_caches)
         blocks_per_chunk = chunk_size // block_size
 
+        if self._chunk_token_buf is not None and (
+            self._chunked_chunk_size != chunk_size
+            or tuple(self._chunk_full_page_table_buf.shape) != tuple(page_table.shape)
+        ):
+            raise ValueError("Prefill buffer geometry cannot change after warmup")
+
         if self._chunked_trace_id is not None:
             ttnn.release_trace(device, self._chunked_trace_id)
             self._chunked_trace_id = None
@@ -1186,40 +1196,24 @@ class Qwen36Model:
         # request time. Zero-initialised -> identity for text-only.
         self._alloc_vision_merge_buffers(device, chunk_size)
 
+        # Keep inputs alive across eager warmup and capture: decode may already be traced.
         rep = ttnn.ReplicateTensorToMesh(device)
-        B = 1
-        # Persistent per-chunk inputs (replicated; addresses baked into trace).
-        self._chunk_token_buf = ttnn.from_torch(
-            torch.zeros(B, chunk_size, dtype=torch.int32),
-            dtype=ttnn.uint32,
-            layout=ttnn.ROW_MAJOR_LAYOUT,
-            device=device,
-            mesh_mapper=rep,
-        )
-        self._chunk_start_idx_tensor = ttnn.from_torch(
-            torch.zeros(1, dtype=torch.int32),
-            dtype=ttnn.int32,
-            layout=ttnn.ROW_MAJOR_LAYOUT,
-            device=device,
-            mesh_mapper=rep,
-        )
-        self._chunk_full_page_table_buf = ttnn.from_torch(
-            page_table, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=device, mesh_mapper=rep
-        )
-        self._chunk_page_table_buf = ttnn.from_torch(
-            page_table[:, :blocks_per_chunk].contiguous(),
-            dtype=ttnn.int32,
-            layout=ttnn.ROW_MAJOR_LAYOUT,
-            device=device,
-            mesh_mapper=rep,
-        )
         cos_t, sin_t = self._rope_tp_cos_sin_torch(0, chunk_size)
-        self._chunk_cos_buf = ttnn.from_torch(
-            cos_t, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device, mesh_mapper=rep
+        inputs = (
+            ("_chunk_token_buf", torch.zeros(1, chunk_size, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),
+            ("_chunk_start_idx_tensor", torch.zeros(1, dtype=torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            ("_chunk_full_page_table_buf", page_table, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            ("_chunk_page_table_buf", page_table[:, :blocks_per_chunk].contiguous(), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            ("_chunk_cos_buf", cos_t, ttnn.bfloat16, ttnn.TILE_LAYOUT),
+            ("_chunk_sin_buf", sin_t, ttnn.bfloat16, ttnn.TILE_LAYOUT),
         )
-        self._chunk_sin_buf = ttnn.from_torch(
-            sin_t, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device, mesh_mapper=rep
-        )
+        for name, value, dtype, layout in inputs:
+            host = ttnn.from_torch(value, dtype=dtype, layout=layout, mesh_mapper=rep)
+            buffer = getattr(self, name)
+            if buffer is None:
+                setattr(self, name, ttnn.to_device(host, device))
+            else:
+                ttnn.copy_host_to_device_tensor(host, buffer)
 
         # Warmup outside trace: compile per-chunk programs.
         self._reset_gdn_state_for_new_sequence()
@@ -1231,6 +1225,10 @@ class Qwen36Model:
             self._chunk_full_page_table_buf,
             self._chunk_page_table_buf,
         )
+        # Reserve the result before any trace and compile its copy during eager warmup.
+        if self._chunked_trace_output is None:
+            self._chunked_trace_output = ttnn.empty_like(warmup_out)
+        ttnn.copy(warmup_out, self._chunked_trace_output)
         ttnn.deallocate(warmup_out)
         ttnn.synchronize_device(device)
 
@@ -1250,7 +1248,7 @@ class Qwen36Model:
         # Capture trace.
         self._reset_gdn_state_for_new_sequence()
         self._chunked_trace_id = ttnn.begin_trace_capture(device, cq_id=0)
-        self._chunked_trace_output = self._forward_prefill_chunk_tp(
+        trace_out = self._forward_prefill_chunk_tp(
             self._chunk_token_buf,
             self._chunk_cos_buf,
             self._chunk_sin_buf,
@@ -1258,6 +1256,8 @@ class Qwen36Model:
             self._chunk_full_page_table_buf,
             self._chunk_page_table_buf,
         )
+        ttnn.copy(trace_out, self._chunked_trace_output)
+        ttnn.deallocate(trace_out)
         ttnn.end_trace_capture(device, self._chunked_trace_id, cq_id=0)
         logger.info("Chunked prefill trace (TP) captured successfully!")
 
@@ -1790,7 +1790,8 @@ class Qwen36Model:
                 assert actual >= 1, f"request {u}: empty prompt (actual_len={actual})"
                 # Trace-safe prefill into the B=1 scratch: prefill_traced_chunked runs short prompts in
                 # one masked-bucket forward and chunks longer ones; GDN state carries + is snapshotted below.
-                lg = self.prefill_traced_chunked(toks[:, :actual], pt[u : u + 1], actual_len=actual)
+                with self.mtp.prefill_request(toks[:, :actual], int(empty_slots[u])) if self.mtp else nullcontext():
+                    lg = self.prefill_traced_chunked(toks[:, :actual], pt[u : u + 1], actual_len=actual)
                 host_logits.append(
                     ttnn.to_torch(lg, mesh_composer=comp).reshape(-1, self.args.vocab_size)[:1].float().view(1, 1, -1)
                 )
@@ -1873,11 +1874,10 @@ class Qwen36Model:
         # The chunked path keys its chunk math on _chunked_chunk_size (default 2048); a parked
         # bucket trace leaves it at 128, breaking num_full/tail sizing. Require it released first.
         assert getattr(self, "_bucket_trace_id", None) is None, (
-            "release the bucket prefill trace before prefill_chunked_peruser " "(_chunked_chunk_size would be wrong)"
+            "release the bucket prefill trace before prefill_chunked_peruser (_chunked_chunk_size would be wrong)"
         )
         assert self._chunked_chunk_size in (None, 2048), (
-            f"prefill_chunked_peruser expects the 2048-token chunk; got _chunked_chunk_size="
-            f"{self._chunked_chunk_size}"
+            f"prefill_chunked_peruser expects the 2048-token chunk; got _chunked_chunk_size={self._chunked_chunk_size}"
         )
 
         B = len(token_ids_list)
@@ -2176,6 +2176,8 @@ class Qwen36Model:
         ttnn.synchronize_device(self.device)
 
         if self.tp_path:
+            if self.mtp is not None:
+                self.mtp.observe_prefill(hidden, chunk_start, page_table)
             return self._masked_bucket_logits_tp(hidden, actual_len, bucket)
 
         # One-hot matmul for last row (fixed program per bucket; slice would recompile per length).
@@ -2204,6 +2206,8 @@ class Qwen36Model:
         ttnn.deallocate(sel_tt)
         x_last = ttnn.to_memory_config(x_last, ttnn.DRAM_MEMORY_CONFIG)
         x_last = self.norm(x_last, mode=Mode.PREFILL)
+        if self.mtp is not None:
+            self.mtp.retain_prefill_hidden(x_last)
         logits = self._lm_head(x_last)
         return ttnn.reshape(logits, (1, 1, logits.shape[-1]))
 
@@ -2251,12 +2255,13 @@ class Qwen36Model:
             return
         k_cache, v_cache = self._paged_kv_caches[0]
         nkv, hd = k_cache.shape[1], k_cache.shape[3]
-        mapper = ttnn.ReplicateTensorToMesh(self.device) if self.num_devices > 1 else None
+        fill_dtype = k_cache.dtype
+        mapper = ttnn.ReplicateTensorToMesh(self.device) if self.tp_path else None
         seen = set()
         for bucket in sorted(buckets):
             k_full = ttnn.from_torch(
                 torch.zeros(1, nkv, bucket, hd, dtype=torch.bfloat16),
-                dtype=k_cache.dtype,
+                dtype=fill_dtype,
                 layout=ttnn.TILE_LAYOUT,
                 device=self.device,
                 # L1 to match the request-time fill's L1 K/V (slice's cache key is buffer-type-specific).
@@ -2320,9 +2325,9 @@ class Qwen36Model:
         blocks_per_chunk = chunk_size // block_size
         num_full = actual_len // chunk_size
         tail_real = actual_len - num_full * chunk_size
-        assert (
-            num_full == 0 or self.tp_path or self._chunked_trace_id is not None
-        ), "Call capture_prefill_trace_chunked first"
+        assert num_full == 0 or self.tp_path or self._chunked_trace_id is not None, (
+            "Call capture_prefill_trace_chunked first"
+        )
 
         # Stage the per-request RoPE once for the whole prompt (M-RoPE for multimodal, 1D for text).
         # The chunk-replay loops + the masked tail then slice this sequence-indexed table by chunk
@@ -2490,6 +2495,8 @@ class Qwen36Model:
             last_hidden = self._forward_prefill_chunk_masked_tp(
                 token_ids[:, cs : cs + chunk_size], chunk_size, cs, page_table, chunk_size, flex_sdpa=flex_sdpa
             )
+            if self.mtp is not None:
+                self.mtp.observe_prefill(last_hidden, cs, page_table)
             ttnn.synchronize_device(self.device)
         if tail_real > 0:
             ttnn.deallocate(last_hidden)
@@ -2606,6 +2613,8 @@ class Qwen36Model:
             )
 
             ttnn.execute_trace(self.device, self._chunked_trace_id, cq_id=0, blocking=False)
+            if self.mtp is not None:
+                self.mtp.observe_prefill(self._chunked_trace_output, cs, page_table)
 
             # Bound in-flight depth; after a sync the completed DMAs' host tensors can be released.
             if (c + 1) % _SYNC_EVERY == 0:

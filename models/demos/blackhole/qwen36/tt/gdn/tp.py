@@ -6,6 +6,7 @@ Recurrence is per value-head (no cross-device comms inside); all-reduce after ro
 Reuses `recurrent_gated_delta_rule_decode_ttnn`; weights interleaved. GDN norm uses raw weight
 (no +1) + SiLU(z) gate — distinct from QK/layer norms.
 """
+
 import os
 
 import torch
@@ -270,9 +271,9 @@ class TPGatedDeltaNet:
             self.reset_state()
             return
         # Zero sources must exist (reset_state runs first; no lazy alloc during trace)
-        assert (
-            self._zero_conv0 is not None and self._zero_conv_carry is not None and self._zero_rec is not None
-        ), "zero sources missing; reset_state must run before reset_state_inplace"
+        assert self._zero_conv0 is not None and self._zero_conv_carry is not None and self._zero_rec is not None, (
+            "zero sources missing; reset_state must run before reset_state_inplace"
+        )
         for cs in self.conv_states:
             ttnn.copy(self._zero_conv0, cs)
         ttnn.copy(self._zero_rec, self.rec_state)
@@ -753,13 +754,13 @@ class TPGatedDeltaNet:
     def _write_recurrent_state_prefix(self, new_rec, B):
         """Write active rows [0:B] without reading or copying idle rows."""
         grid_size = self.mesh.compute_with_storage_grid_size()
-        assert (
-            grid_size.x >= 8 and grid_size.y >= 6
-        ), f"GDN prefix state write needs an 8x6 core rectangle, got {grid_size.x}x{grid_size.y}"
+        assert grid_size.x >= 8 and grid_size.y >= 6, (
+            f"GDN prefix state write needs an 8x6 core rectangle, got {grid_size.x}x{grid_size.y}"
+        )
         nhw = B * self.Nv * self.Dk
-        assert (
-            nhw % ttnn.TILE_SIZE == 0
-        ), f"GDN prefix state rows B={B}, Nv={self.Nv}, Dk={self.Dk} -> {nhw} is not tile-aligned"
+        assert nhw % ttnn.TILE_SIZE == 0, (
+            f"GDN prefix state rows B={B}, Nv={self.Nv}, Dk={self.Dk} -> {nhw} is not tile-aligned"
+        )
         n_tiles = nhw // ttnn.TILE_SIZE
 
         # Prefer the tuned 8x6=48-core rectangle, which every TP=4 shape hits (Nv=12 -> nhw=B*1536
@@ -1037,22 +1038,62 @@ class TPGatedDeltaNet:
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
         )
 
-    def forward_decode(self, x):
-        tw, Nk, Nv, Dk, Dv = self.tw, self.Nk, self.Nv, self.Dk, self.Dv
-        Bmax = self.B
-        _L1 = ttnn.L1_MEMORY_CONFIG  # keep decode conv→recurrence→norm/gate chain L1-resident
-        if self.conv_states is None:
-            self.reset_state()
+    def forward_decode(self, x: ttnn.Tensor) -> ttnn.Tensor:
+        """Decode active batch prefix; preserve existing state-update semantics."""
         if len(x.shape) == 4:
             x = ttnn.reshape(x, (1, x.shape[-2], x.shape[-1]))
 
-        # Active decode width, taken from the input. Normally == Bmax. BUCKETED decode: a request
-        # feeds B<Bmax tokens and the whole step runs on state rows [0:B]; idle rows [B:Bmax] are
-        # preserved. Conv taps are per-channel (broadcast over batch), so the conv weighted-sum
-        # works at any width. The B==Bmax path is byte-identical to before.
-        B = x.shape[-2]
+        qkv, z, a, b = self._project_qkvzab(x, x.shape[-2], out_mc=ttnn.L1_MEMORY_CONFIG)
+        return self._project_decode_output(self._decode_gated(qkv, z, a, b))
 
-        qkv, z, a, b = self._project_qkvzab(x, B, out_mc=_L1)
+    def forward_verify(
+        self,
+        x: ttnn.Tensor,
+        updates: list[tuple[ttnn.Tensor, ...]],
+        conv_inputs: list[ttnn.Tensor],
+    ) -> ttnn.Tensor:
+        """Verify consecutive tokens against bound single-user scratch state.
+
+        requires: B=1; 1 <= token count <= 32; scratch and tape allocated before capture.
+        ensures: sequential decode recurrence; input/output projections amortized
+            across tokens; tape retains exact finite-precision state-write operands.
+        hypothesis: L2 sequential decode comparison; every accepted-prefix boundary.
+        """
+        count = x.shape[-2]
+        assert self.B == 1 and 1 <= count <= 32
+        assert len(updates) >= count and len(conv_inputs) >= count
+        x = ttnn.reshape(x, (1, count, x.shape[-1]))
+        projected = self._project_qkvzab(x, count, out_mc=ttnn.L1_MEMORY_CONFIG)
+        gated_rows = []
+        for index in range(count):
+            qkv, z, a, b = [ttnn.slice(tensor, (0, index, 0), (1, index + 1, tensor.shape[-1])) for tensor in projected]
+            ttnn.copy(qkv, conv_inputs[index])
+            gated_rows.append(self._decode_gated(qkv, z, a, b, updates[index]))
+        for tensor in projected:
+            ttnn.deallocate(tensor)
+        gated = ttnn.concat(gated_rows, dim=1, memory_config=ttnn.L1_MEMORY_CONFIG)
+        for tensor in gated_rows:
+            ttnn.deallocate(tensor)
+        return self._project_decode_output(gated)
+
+    def _decode_gated(
+        self,
+        qkv: ttnn.Tensor,
+        z: ttnn.Tensor,
+        a: ttnn.Tensor,
+        b: ttnn.Tensor,
+        state_update: tuple[ttnn.Tensor, ...] | None = None,
+    ) -> ttnn.Tensor:
+        """Advance bound recurrence; return gated values before output projection.
+
+        requires: projected rows fit bound state; optional tape matches recurrence operands.
+        ensures: decode convolution and recurrence order remain unchanged.
+        """
+        tw, Nk, Nv, Dk, Dv = self.tw, self.Nk, self.Nv, self.Dk, self.Dv
+        B, Bmax = qkv.shape[-2], self.B
+        _L1 = ttnn.L1_MEMORY_CONFIG
+        if self.conv_states is None:
+            self.reset_state()
 
         # Conv1d shift-register + weighted sum + SiLU
         st = self.conv_states
@@ -1110,6 +1151,7 @@ class TPGatedDeltaNet:
             initial_state=init_state,
             device=self.mesh,
             high_precision=(os.environ.get("QWEN35_GDN_DECODE_BF16") != "1"),
+            state_update=state_update,
         )
         if init_state is not self.rec_state:
             ttnn.deallocate(init_state)
@@ -1131,8 +1173,13 @@ class TPGatedDeltaNet:
         gated = _silu_mul(out_f, z, _L1)
         ttnn.deallocate(out_f)
         ttnn.deallocate(z)
+        return gated
 
-        partial = self._row_proj(gated, tw["out"])
+    def _project_decode_output(self, gated: ttnn.Tensor) -> ttnn.Tensor:
+        """Project gated rows; preserve decode collective and output layout."""
+        B = gated.shape[-2]
+
+        partial = self._row_proj(gated, self.tw["out"])
         ttnn.deallocate(gated)
         partial = ttnn.reshape(partial, (1, 1, B, partial.shape[-1]))
         out = tt_all_reduce(
