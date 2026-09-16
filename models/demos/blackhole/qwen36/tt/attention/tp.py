@@ -814,10 +814,10 @@ class TPAttention:
         else:
             q8 = q
 
-        # Mixed BF16 queries/BFP8 KV need smaller tiles: 128x128 SDPA CBs
-        # overlap live prefill L1 tensors. Fully quantized and BFP4-KV paths
-        # retain 128; dynamic offsets must be aligned to the selected tile.
-        cap = 64 if not self._sdpa_bf8 and k_paged.dtype == ttnn.bfloat8_b else 128
+        # BF16 queries with BFP8 or BF16 KV need smaller tiles: 128x128 SDPA
+        # CBs overlap live prefill L1 tensors. Fully quantized and BFP4-KV
+        # paths retain 128; dynamic offsets align to the selected tile.
+        cap = 64 if not self._sdpa_bf8 and k_paged.dtype in (ttnn.bfloat8_b, ttnn.bfloat16) else 128
         if chunk_start_idx_tensor is not None:
             qk_chunk = cap
         else:

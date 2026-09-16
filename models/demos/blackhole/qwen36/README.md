@@ -90,11 +90,29 @@ For shared trace execution:
 
 1. Allocate the verifier after target KV and stable GDN state, before capturing traces.
 2. Warm verification, checkpoint copies, and every supported slot/prefix fold before any trace is parked.
-3. Call `prepare(slot, start_position)` outside capture, then capture only `verify_prepared(...)`. Retain its inputs and outputs for the trace lifetime.
+3. Allocate persistent inputs and output destinations before any model trace. Call `prepare(slot, start_position)` outside capture. Capture `verify_prepared(...)`, copy its results into those destinations, then deallocate the temporary results inside capture.
 4. Before each replay, upload the request's inputs and page table, then call `prepare(slot, start_position)`.
 5. After successful replay, call `record_replay(count)` before `fold(accepted_inputs)`. Device replay does not execute Python metadata updates.
 
-The captured verifier contains no committed-slot selection, so requests with the same input shapes share one trace. Only one verification may remain pending across all slots. Trace outputs remain trace-owned; ordinary eager outputs are caller-owned. Reserve trace memory for the captured command streams separately from KV capacity.
+The captured verifier contains no committed-slot selection, so requests with the same input shapes share one trace. Only one verification may remain pending across all slots. Persistent output destinations remain caller-owned for the trace lifetime; ordinary eager outputs are also caller-owned. Retaining a later trace's newly allocated outputs can conflict with an earlier trace's replay. Reserve trace memory for the captured command streams separately from KV capacity.
+
+## Native MTP cache ownership
+
+Native `initialize_vllm_model(..., num_speculative_tokens=K)` loads and attaches MTP before cache allocation, selects the TP modules even for a single request, and bounds verification tapes to `K + 1` inputs (drafts plus anchor). Supported `K` is 1–31 with `tt_data_parallel=1`; zero leaves MTP disabled. Draft loading follows the target's surrounding weight-conversion context. Direct native callers can instead attach `Qwen36MTP.from_pretrained(..., max_verify_tokens=N)` to `model.mtp`; its default bound remains 32.
+
+The TP allocator creates independent BFP8 draft KV with the same physical page IDs. The target's recurrent-slot remap also transfers owned hidden feedback; paged KV stays in place and follows request page tables. Native prefill warmup compiles the draft observer alongside target chunks and masked buckets. Observer inputs remain allocated per bucket; request-time host uploads reuse them. Plugin admission, speculative trace orchestration and scheduling remain separate integration requirements.
+
+Per-slot feedback storage is allocated with draft caches, before any trace capture. Prefill replaces its contents without replacing its allocation; slot remapping transfers buffer ownership.
+
+Release caller-owned decode, bucket-prefill and verification traces before `model.free_kv_caches()`. Target teardown releases its chunked-prefill trace, then MTP releases its proposal trace, hidden feedback and prefill staging. Verifier tapes and draft KV follow before target caches. Pending verification is discarded, not committed; repeated teardown is harmless. Reallocation retains weights and creates fresh verification state.
+
+## MTP proposal trace lifecycle
+
+`Qwen36MTP.prepare_proposal(...)` allocates persistent input copies and output destinations before any model trace. It warms the draft forward pass, shared LM projection and buffer copies. `capture_proposal()` captures one step, copies results into the prepared destinations and releases temporary results inside capture. Requests with matching input shapes share that trace.
+
+`proposal_step(...)` returns borrowed logits and normalized hidden state, overwritten by the next replay. The preceding borrowed hidden state can feed the next recursive step directly. Caller device buffers must be allocated before capture; update their contents through host-to-device copies. Draft cache positions are absolute token positions minus one, while rotary tensors encode absolute positions.
+
+Warmup and capture write draft KV. Restore request cache contents before inference when warmup touched live pages. Call `release_proposal()` before freeing draft KV or weights; it releases the trace before its persistent buffers. Sampling and accepted-prefix target feedback remain caller responsibilities.
 
 ## End-to-end demo test (`demo/text_demo.py`)
 
