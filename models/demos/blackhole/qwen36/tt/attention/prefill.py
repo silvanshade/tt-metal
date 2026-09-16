@@ -5,6 +5,7 @@
 Branch A: paged prefill (chunk_page_table is not None) — no memory_config, no cur_pos_tensor.
 Branch C: concat prefill (else) — uses memory_config, past_key/past_value; returns new_key/new_value.
 """
+
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_gated_attention import gated_attention_forward_ttnn
 
 
@@ -26,6 +27,7 @@ def prefill_forward(
     past_key=None,
     past_value=None,
     use_paged_attention=False,
+    qk_rotation=None,
 ):
     """Dispatch prefill to paged (Branch A) or concat (Branch C) path."""
     if use_paged_attention and chunk_page_table is not None:
@@ -55,6 +57,7 @@ def prefill_forward(
             chunk_page_table=chunk_page_table,
             chunk_start_idx=chunk_start_idx,
             chunk_start_idx_tensor=chunk_start_idx_tensor,
+            qk_rotation=qk_rotation,
         )
         return output
     else:
@@ -81,5 +84,6 @@ def prefill_forward(
             use_optimized_concat=True,
             memory_config=mc,
             norm_weights_pre_offset=True,
+            qk_rotation=qk_rotation,
         )
         return output, new_key, new_value

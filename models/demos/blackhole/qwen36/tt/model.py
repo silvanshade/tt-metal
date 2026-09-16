@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 import ttnn
 from models.common.rmsnorm import RMSNorm
+from models.common.hadamard import HadamardRotation
 from models.demos.blackhole.qwen36.tt.layer import Qwen36DecoderLayer
 from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
 from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup
@@ -83,6 +84,15 @@ class Qwen36Model:
         self.layer_indices = getattr(args, "layer_indices", None) or list(range(args.n_layers))
 
         # Per-request vision grid (t,h,w), stashed by get_image_features / get_video_features so the
+        # Bind once before caches/traces exist; target and MTP share this callable.
+        # Disabling returns the input unchanged, without allocation or deallocation.
+        qk_hadamard = os.environ.get("QWEN_QK_HADAMARD", "1") == "1"
+        self.qk_rotation = (
+            (HadamardRotation(mesh_device, args.head_dim) if qk_hadamard else lambda tensor: tensor)
+            if any(args.is_full_attention_layer(i) for i in self.layer_indices)
+            else None
+        )
+        logger.info("Q/K Hadamard enabled={} (startup-only; restart to change cache basis)", qk_hadamard)
         # prefill paths can build the multimodal 3D RoPE (M-RoPE) position ids without threading
         # grid_thw through every prefill signature. Exactly one is non-None for a multimodal request
         # (image XOR video); both None => text-only. The active one also selects which placeholder
@@ -94,7 +104,9 @@ class Qwen36Model:
         logger.info(f"Loading {len(self.layer_indices)} transformer layers (indices={self.layer_indices})...")
         self.layers = []
         for i in tqdm(self.layer_indices, desc="Loading layers"):
-            layer = Qwen36DecoderLayer(mesh_device, args, state_dict, i, tensor_cache_path, tt_ccl=self.tt_ccl)
+            layer = Qwen36DecoderLayer(
+                mesh_device, args, state_dict, i, tensor_cache_path, tt_ccl=self.tt_ccl, qk_rotation=self.qk_rotation
+            )
             self.layers.append(layer)
 
         # Framework RMSNorm (add_unit_offset=True). Single device: is_distributed=None.
