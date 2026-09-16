@@ -211,8 +211,31 @@ def _full_grid_crs(grid):
     return ttnn.CoreRangeSet({ttnn.CoreRange(ttnn.CoreCoord(0, 0), ttnn.CoreCoord(gx - 1, gy - 1))})
 
 
+# Worker L1 on Blackhole and Wormhole minus the ~64 KB the runtime reserves at the top.
+_L1_CB_BUDGET = 1_572_864 - 65_536
+
+
+def _prefill_2d_fits_l1(per_core_M, per_core_N, in0_block_w):
+    """Whether the 2D mcast matmul's static CBs fit worker L1 for one core's block.
+
+    The kernel keeps a core's whole [per_core_M, per_core_N] output block in L1 while it
+    accumulates over K (fp32 accumulate: 4 KB per tile) plus double-buffered in0/in1 blocks
+    (bf16 activations: 2 KB per tile). Sized from the TP=4 shapes the config was tuned on, a
+    core's block is a fraction of the weight; at TP=1 the same builder sees the full width and
+    the block alone exceeds L1 (N=16480 at M=2048 on 8x10: 7x65 tiles = 1.8 MB)."""
+    out = per_core_M * per_core_N * 4096
+    in0 = 2 * per_core_M * in0_block_w * 2048
+    in1 = 2 * in0_block_w * per_core_N * 2048
+    return out + in0 + in1 <= _L1_CB_BUDGET
+
+
 def create_prefill_matmul_program_config(m, k, n, grid_size=None, fused_activation=None, tuning=None):
-    """2D prefill matmul progcfg (DRAM-interleaved).
+    """2D prefill matmul progcfg (DRAM-interleaved), or None when the block cannot fit L1.
+
+    None hands the shape to ttnn.linear's own selector, which blocks the output over several
+    passes; that is the config the single-device path runs every projection under, so the (1,1)
+    mesh batching path (full-width weights through the TP modules) falls back to known numerics
+    rather than a config the kernel rejects. Every TP>=2 shape fits and keeps the tuned config.
 
     fused_activation in packer; sharded kernel rejects ttnn.linear(activation=...) with progcfg.
     tuning: a `_PREFILL_TUNING` entry (see `prefill_tuning`); None = the frozen TP=4 behavior."""
@@ -233,6 +256,9 @@ def create_prefill_matmul_program_config(m, k, n, grid_size=None, fused_activati
         in0_block_w = _find_largest_divisor(k_tiles, cap)
     else:
         in0_block_w = min(cap, max(1, k_tiles // grid_size[0]))
+
+    if not _prefill_2d_fits_l1(per_core_M, per_core_N, in0_block_w):
+        return None
 
     return ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
         compute_with_storage_grid_size=grid_size,

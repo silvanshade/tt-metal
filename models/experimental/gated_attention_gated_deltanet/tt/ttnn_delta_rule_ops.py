@@ -240,6 +240,13 @@ def l2_norm_ttnn(x, dim=-1, eps=1e-6):
     return ttnn.multiply(x, inv_norm, memory_config=mc)
 
 
+def _state_memory_config(B, H, K, V):
+    """L1 while the [B,H,K,V] state-sized buffers fit beside the resident activations: the outer
+    product allocates 2x the bf16 size (fp32 accumulate), so the bf16 block is capped at 16 MB
+    (B=8 at H=48 is 12.5 MB; B=16 is 25 MB -> DRAM)."""
+    return ttnn.L1_MEMORY_CONFIG if B * H * K * V * 2 <= 16 * 1024 * 1024 else ttnn.DRAM_MEMORY_CONFIG
+
+
 def fused_decay_and_write_ttnn(
     h,
     k_t,
@@ -261,8 +268,10 @@ def fused_decay_and_write_ttnn(
     # beta: [B,H] -> [B,H,1,1]
     beta_expanded = ttnn.reshape(beta_t, [B, H, 1, 1], memory_config=ttnn.L1_MEMORY_CONFIG)
 
-    # Decode opt: keep state-write operands in L1 (tiny at B=1).
+    # State-write operands in L1 when the [B,H,K,V] outer product fits beside the resident
+    # activations (tiny at B=1; 25 MB at B=8, H=48); otherwise DRAM, same math, one extra bounce.
     _L1 = ttnn.L1_MEMORY_CONFIG
+    _state_mc = _state_memory_config(B, H, K, V)
     k_col = ttnn.reshape(k_t, [B, H, K, 1], memory_config=_L1)
     d_row = ttnn.reshape(delta, [B, H, 1, V], memory_config=_L1)
 
@@ -279,7 +288,7 @@ def fused_decay_and_write_ttnn(
     outer = ttnn.matmul(
         k_col,
         d_row,
-        memory_config=_L1,
+        memory_config=_state_mc,
         compute_kernel_config=matmul_compute_cfg,
         program_config=None,
     )
@@ -288,13 +297,13 @@ def fused_decay_and_write_ttnn(
     outer = ttnn.multiply(
         outer,
         beta_expanded,
-        memory_config=_L1,
+        memory_config=_state_mc,
     )
 
     # apply_decay=False: h already decayed (decay->read->write order).
     if apply_decay:
-        h = ttnn.multiply(h, decay, memory_config=_L1)
-    h = ttnn.add(h, outer, memory_config=_L1)
+        h = ttnn.multiply(h, decay, memory_config=_state_mc)
+    h = ttnn.add(h, outer, memory_config=_state_mc)
 
     return h
 
@@ -448,12 +457,14 @@ def recurrent_gated_delta_rule_decode_ttnn(
         except Exception:
             pass
 
-    # Decay before read; keep recurrence step L1-resident.
+    # Decay before read; the recurrence step stays L1-resident while the [B,H,K,V] state fits
+    # (see fused_decay_and_write_ttnn: two state-sized buffers are live here).
     # decay = exp(g), fused as a pre-activation on the multiply's second operand — one fewer op
     # than a standalone ttnn.exp + multiply.
     _L1 = ttnn.L1_MEMORY_CONFIG
+    _state_mc = _state_memory_config(B, H, K, V)
     g_bhkv = ttnn.reshape(g_t, [B, H, 1, 1], memory_config=_L1)
-    h = ttnn.multiply(h, g_bhkv, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_L1)
+    h = ttnn.multiply(h, g_bhkv, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=_state_mc)
 
     # v_read = k @ h (decayed state)
     v_read = ttnn.matmul(

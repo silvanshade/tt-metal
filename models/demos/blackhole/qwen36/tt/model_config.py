@@ -95,9 +95,14 @@ class Qwen36ModelArgs(ModelArgs):
             self.weight_dtype = None
             self.act_dtype = None
 
-        # TP config (num_devices>1 only). 27B (1,4) sharded dims + DRAM matmul cfgs; see tp_common.py.
+        # Sharded-module path. Selected by device count OR by batch: the TP modules carry the
+        # per-slot GDN state, per-user rope, slot prefill and bucketed decode traces that continuous
+        # batching needs, and every collective they issue is a no-op on a (1,1) mesh
+        # (tt_all_reduce returns its input; the fused AG/RS matmuls are gated below). The
+        # single-device modules stay the B=1 path. Shard math still divides by num_devices.
         self.num_devices = mesh_device.get_num_devices() if mesh_device is not None else 1
-        if mesh_device is not None and self.num_devices > 1:
+        self.tp_path = self.num_devices > 1 or max_batch_size > 1
+        if mesh_device is not None and self.tp_path:
             self._init_tp_config(mesh_device)
 
     def _init_tp_config(self, mesh_device):

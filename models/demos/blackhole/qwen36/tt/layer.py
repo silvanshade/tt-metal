@@ -28,6 +28,9 @@ class Qwen36DecoderLayer:
         self.args = args
         self.tt_ccl = tt_ccl
         self.num_devices = getattr(args, "num_devices", 1)
+        # Sharded-module path (see Qwen36ModelArgs.tp_path): TP modules, DistributedNorm, TP forward
+        # signatures. True on a mesh or for max_batch_size > 1 on one device.
+        self.tp_path = getattr(args, "tp_path", self.num_devices > 1)
         self.is_full_attention = args.is_full_attention_layer(layer_num)
 
         prefix = f"layers.{layer_num}"
@@ -76,7 +79,7 @@ class Qwen36DecoderLayer:
             enable_all_gather=not self._fuse_ff_agmm,
         )
 
-        if self.num_devices > 1:
+        if self.tp_path:
             # Tensor-parallel modules (sharded weights from the raw substate).
             # Cache the sharded mesh weights to disk so re-runs skip the (slow,
             # single-threaded) reorder+shard of the full 27B.
@@ -138,11 +141,11 @@ class Qwen36DecoderLayer:
             eps=args.norm_eps,
             **(
                 dict(is_distributed=args.is_distributed_norm, ccl_topology=args.ccl_topology(), tt_ccl=tt_ccl)
-                if self.num_devices > 1
+                if self.tp_path
                 else {}
             ),
         )
-        if self.num_devices > 1:
+        if self.tp_path:
             from models.tt_transformers.tt.distributed_norm import DistributedNorm
 
             return DistributedNorm(
@@ -166,7 +169,7 @@ class Qwen36DecoderLayer:
         gdn_collect=False,
     ):
         _norm_mode = Mode.PREFILL if mode == "prefill" else Mode.DECODE
-        if self.num_devices > 1:
+        if self.tp_path:
             # TP: DistributedNorm uses the framework's per-norm memory configs.
             _attn_norm_config = self.args.get_norm_config("attn", _norm_mode)
             # PREFILL: distributed rmsnorm outputs in L1 so the fused in-proj AGMM gathers from L1, not DRAM.
@@ -187,7 +190,7 @@ class Qwen36DecoderLayer:
             )
         attn_input = self.attention_norm(x, mode=_norm_mode, norm_config=_attn_norm_config)
 
-        if self.num_devices > 1:
+        if self.tp_path:
             # TP modules: input is the gathered (full-dim) norm output [1,1,B/S,dim];
             # output is fractured along dim=3. cos/sin are in rope_tp format.
             if self.is_full_attention:
