@@ -41,7 +41,14 @@ class Qwen36MTP:
     - hypothesis: rejection replay detects stale KV visibility.
     """
 
-    def __init__(self, target: "Qwen36Model", state_dict: dict[str, torch.Tensor], cache_path: Path) -> None:
+    def __init__(
+        self,
+        target: "Qwen36Model",
+        state_dict: dict[str, torch.Tensor],
+        cache_path: Path,
+        *,
+        max_verify_tokens: int = 32,
+    ) -> None:
         """Load independent draft weights without duplicating shared target weights.
 
         # Specification
@@ -53,6 +60,9 @@ class Qwen36MTP:
         # Adequacy
         - hypothesis: reference outputs detect wrong layers and cache collisions; target continuation detects aliasing.
         """
+        if not 1 <= max_verify_tokens <= 32:
+            raise ValueError(f"MTP verification bound must be in [1, 32], got {max_verify_tokens}")
+        self.max_verify_tokens = max_verify_tokens
         if not target.tp_path:
             raise ValueError("MTP requires the TP model path")
         self.target = target
@@ -82,6 +92,89 @@ class Qwen36MTP:
         self.previous_hidden: dict[int, ttnn.Tensor] = {}
         self._prefill_tokens: torch.Tensor | None = None
         self._prefill_slot = 0
+        self._prefill_inputs: dict[int, tuple[ttnn.Tensor, ...]] = {}
+        self._proposal_inputs: tuple[ttnn.Tensor, ...] = ()
+        self._proposal_outputs: tuple[ttnn.Tensor, ttnn.Tensor] | None = None
+        self._proposal_trace: ttnn.MeshTraceId | None = None
+        self._kv_caches: tuple[ttnn.Tensor, ...] = ()
+        self.verifier: Qwen36MTPVerifier | None = None
+
+    def allocate_kv_caches(self, kv_cache_shape: tuple[int, ...]) -> None:
+        """Allocate independent BFP8 draft KV and target verification tapes.
+
+        requires: target caches and stable recurrent state allocated; no model traces;
+            no existing draft allocation; shape matches target physical page pool.
+        ensures: draft pages use target block IDs without sharing target KV storage.
+            Target verification supports the configured maximum input count.
+        """
+        assert not self._kv_caches and self.verifier is None
+        attention = self.layer.attention
+        assert isinstance(attention, TPAttention)
+        self._kv_caches = tuple(
+            ttnn.as_tensor(
+                torch.zeros(kv_cache_shape, dtype=torch.bfloat16),
+                device=self.target.mesh_device,
+                dtype=ttnn.bfloat8_b,
+                layout=ttnn.TILE_LAYOUT,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(self.target.mesh_device),
+            )
+            for _ in range(2)
+        )
+        attention.set_paged_kv_cache(*self._kv_caches)
+        self.verifier = Qwen36MTPVerifier(self.target, self.max_verify_tokens)
+        initial_hidden = ttnn.from_torch(
+            torch.zeros((1, 1, 1, self.target.args.dim), dtype=torch.bfloat16),
+            dtype=ttnn.bfloat16,
+            layout=ttnn.TILE_LAYOUT,
+            mesh_mapper=ttnn.ReplicateTensorToMesh(self.target.mesh_device),
+        )
+        self.previous_hidden = {
+            slot: ttnn.to_device(initial_hidden, self.target.mesh_device)
+            for slot in range(self.target.args.max_batch_size)
+        }
+
+    def free_kv_caches(self) -> None:
+        """Release proposal trace, feedback, verifier tapes, then draft KV.
+
+        requires: caller released other traces referencing verification or draft buffers.
+        ensures: no speculative state committed; weights retained for reallocation.
+        """
+        self.release_proposal()
+        for hidden in self.previous_hidden.values():
+            ttnn.deallocate(hidden)
+        self.previous_hidden.clear()
+        for buffers in self._prefill_inputs.values():
+            for tensor in buffers:
+                ttnn.deallocate(tensor)
+        self._prefill_inputs.clear()
+        if self.verifier is not None:
+            self.verifier.release()
+            self.verifier = None
+        attention = self.layer.attention
+        assert isinstance(attention, TPAttention)
+        attention.paged_k = attention.paged_v = None
+        for tensor in self._kv_caches:
+            ttnn.deallocate(tensor)
+        self._kv_caches = ()
+
+    def remap_slots(self, remap: torch.Tensor) -> None:
+        """Move owned hidden feedback with the scheduler's gather permutation.
+
+        requires: no pending verification; remap is a permutation of scheduler slots.
+        ensures: slot i owns the prior hidden at remap[i]; padded slots stay put.
+            No device allocation or copy; paged KV follows request block tables.
+        """
+        if self.verifier is not None:
+            assert self.verifier.slot == -1
+        indices = [int(value) for value in remap]
+        assert sorted(indices) == list(range(len(indices)))
+        old = self.previous_hidden
+        self.previous_hidden = {
+            slot: old[source]
+            for slot in range(self.target.args.max_batch_size)
+            if (source := indices[slot] if slot < len(indices) else slot) in old
+        }
 
     def _make_norm(
         self, state_dict: dict[str, torch.Tensor], name: str, cache_path: Path, *, fractured: bool
@@ -115,7 +208,7 @@ class Qwen36MTP:
         return norm
 
     @classmethod
-    def from_pretrained(cls, target: "Qwen36Model", checkpoint: Path) -> "Qwen36MTP":
+    def from_pretrained(cls, target: "Qwen36Model", checkpoint: Path, *, max_verify_tokens: int = 32) -> "Qwen36MTP":
         """Read only MTP checkpoint tensors and share the loaded target.
 
         # Specification
@@ -141,7 +234,7 @@ class Qwen36MTP:
                 for name, source in names.items():
                     if source == shard_name:
                         weights[name.removeprefix("mtp.")] = shard.get_tensor(name)
-        return cls(target, weights, target.args.weight_cache_path() / "mtp")
+        return cls(target, weights, target.args.weight_cache_path() / "mtp", max_verify_tokens=max_verify_tokens)
 
     def forward(
         self,
@@ -178,6 +271,104 @@ class Qwen36MTP:
         result = self.norm(hidden, mode=Mode.DECODE, norm_config=norm_config)
         ttnn.deallocate(hidden)
         return result
+
+    def prepare_proposal(
+        self,
+        token_ids: ttnn.Tensor,
+        previous_hidden: ttnn.Tensor,
+        cos: ttnn.Tensor,
+        sin: ttnn.Tensor,
+        cache_positions: ttnn.Tensor,
+        page_table: ttnn.Tensor,
+    ) -> None:
+        """Allocate stable proposal inputs and warm forward, projection and copies.
+
+        requires: draft KV attached; no prepared proposal; inputs satisfy forward.
+        ensures: caller retains inputs; persistent copies survive capture and replay.
+            Warmup writes draft KV and must precede every model's trace capture.
+        hypothesis: recursive replay matches eager hidden feedback and token choices.
+        """
+        assert not self._proposal_inputs and self._proposal_trace is None
+        sources = (token_ids, previous_hidden, cos, sin, cache_positions, page_table)
+        self._proposal_inputs = tuple(ttnn.clone(tensor) for tensor in sources)
+        for source, target in zip(sources, self._proposal_inputs, strict=True):
+            ttnn.copy(source, target)
+        hidden = self.forward(*self._proposal_inputs)
+        logits = self.target._lm_head(hidden)
+        self._proposal_outputs = ttnn.clone(logits), ttnn.clone(hidden)
+        for source, destination in zip((logits, hidden), self._proposal_outputs, strict=True):
+            ttnn.copy(source, destination)
+        # Recursive feedback may come directly from the previous replay's output.
+        ttnn.copy(hidden, self._proposal_inputs[1])
+        ttnn.copy(previous_hidden, self._proposal_inputs[1])
+        ttnn.deallocate(logits)
+        ttnn.deallocate(hidden)
+
+    def capture_proposal(self) -> None:
+        """Capture one shared draft step and LM projection after global warmup.
+
+        requires: prepare_proposal completed; no existing proposal trace.
+        ensures: owns captured outputs until release_proposal; capture writes draft KV.
+            Caller restores request cache contents before inference if warmup touched them.
+        hypothesis: program-cache-frozen capture and replay perform no JIT compilation.
+        """
+        assert self._proposal_inputs and self._proposal_trace is None
+        assert self._proposal_outputs is not None
+        mesh = self.target.mesh_device
+        trace_id = ttnn.begin_trace_capture(mesh, cq_id=0)
+        hidden = self.forward(*self._proposal_inputs)
+        logits = self.target._lm_head(hidden)
+        for source, destination in zip((logits, hidden), self._proposal_outputs, strict=True):
+            ttnn.copy(source, destination)
+            ttnn.deallocate(source)
+        ttnn.end_trace_capture(mesh, trace_id, cq_id=0)
+        self._proposal_trace = trace_id
+
+    def proposal_step(
+        self,
+        token_ids: ttnn.Tensor,
+        previous_hidden: ttnn.Tensor,
+        cos: ttnn.Tensor,
+        sin: ttnn.Tensor,
+        cache_positions: ttnn.Tensor,
+        page_table: ttnn.Tensor,
+    ) -> tuple[ttnn.Tensor, ttnn.Tensor]:
+        """Replay a shared proposal step with request-selected pages and positions.
+
+        requires: captured trace; input shapes, dtypes and layouts match preparation.
+            Caller device buffers must predate trace capture; upload host values into
+            persistent staging buffers rather than allocating device inputs on replay.
+            Inputs satisfy forward; request draft KV prefix is valid.
+        ensures: returns borrowed logits and hidden, overwritten by the next replay.
+            Prior borrowed hidden may be passed directly as recursive feedback.
+            Enqueues on CQ0; host consumption must synchronize through normal tensor read.
+        hypothesis: alternating page tables and crossing page boundaries match eager
+            recursive proposals without changing another request's KV.
+        """
+        assert self._proposal_trace is not None and self._proposal_outputs is not None
+        sources = (token_ids, previous_hidden, cos, sin, cache_positions, page_table)
+        for source, target in zip(sources, self._proposal_inputs, strict=True):
+            ttnn.copy(source, target)
+        ttnn.execute_trace(self.target.mesh_device, self._proposal_trace, cq_id=0, blocking=False)
+        return self._proposal_outputs
+
+    def release_proposal(self) -> None:
+        """Release trace before its persistent buffers; preserve weights and draft KV.
+
+        requires: no concurrent proposal consumption; borrowed outputs no longer used.
+        ensures: repeated release is harmless; preparation can allocate a fresh trace.
+        hypothesis: release and recapture preserve subsequent proposal results.
+        """
+        if self._proposal_trace is not None:
+            ttnn.release_trace(self.target.mesh_device, self._proposal_trace)
+            self._proposal_trace = None
+        if self._proposal_outputs is not None:
+            for tensor in self._proposal_outputs:
+                ttnn.deallocate(tensor)
+            self._proposal_outputs = None
+        for tensor in self._proposal_inputs:
+            ttnn.deallocate(tensor)
+        self._proposal_inputs = ()
 
     def refresh(
         self,
@@ -272,13 +463,10 @@ class Qwen36MTP:
         """Bind one prompt's hidden feedback until prefill completes.
 
         requires: unpadded [1,T] tokens; no nested prefill; slot owns this request.
-        ensures: prior slot feedback is released; prompt binding clears on failure.
+        ensures: slot feedback storage is reused; prompt binding clears on failure.
         hypothesis: successive prompts and slot reuse cannot consume stale feedback.
         """
         assert self._prefill_tokens is None and tokens.shape[0] == 1
-        previous = self.previous_hidden.pop(slot, None)
-        if previous is not None:
-            ttnn.deallocate(previous)
         self._prefill_tokens = tokens
         self._prefill_slot = slot
         try:
@@ -304,40 +492,39 @@ class Qwen36MTP:
             return
         mapper = ttnn.ReplicateTensorToMesh(self.target.mesh_device)
 
-        def upload(value: torch.Tensor, dtype: ttnn.DataType, layout: ttnn.Layout) -> ttnn.Tensor:
-            return ttnn.from_torch(
-                value.contiguous(),
-                dtype=dtype,
-                layout=layout,
-                device=self.target.mesh_device,
-                mesh_mapper=mapper,
-                memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            )
+        def host(value: torch.Tensor, dtype: ttnn.DataType, layout: ttnn.Layout) -> ttnn.Tensor:
+            return ttnn.from_torch(value.contiguous(), dtype=dtype, layout=layout, mesh_mapper=mapper)
 
         shifted = torch.zeros((1, size), dtype=torch.int32)
         shifted[:, :valid] = tokens[:, start + 1 : start + 1 + valid]
-        ids = upload(shifted, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT)
         assert isinstance(self.layer.attention, TPAttention) and self.layer.attention.paged_k is not None
         block_size = self.layer.attention.paged_k.shape[2]
         first_block = start // block_size
-        chunk_pages = upload(
-            pages[:, first_block : first_block + size // block_size],
-            ttnn.int32,
-            ttnn.ROW_MAJOR_LAYOUT,
-        )
+        chunk_pages = pages[:, first_block : first_block + size // block_size]
         # Fixed full width prevents per-position page-table programs after capture.
         width = ((self.args.max_seq_len + size + block_size * 32 - 1) // (block_size * 32)) * 32
         full_pages = torch.zeros((1, width), dtype=torch.int32)
         full_pages[:, : pages.shape[1]] = pages
-        table = upload(full_pages, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
-        offset = upload(torch.tensor([start], dtype=torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT)
         cos_values, sin_values = self.target._rope_tp_cos_sin_torch(start + 1, size)
-        cos = upload(cos_values, ttnn.bfloat16, ttnn.TILE_LAYOUT)
-        sin = upload(sin_values, ttnn.bfloat16, ttnn.TILE_LAYOUT)
+        sources = (
+            host(shifted, ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),
+            host(chunk_pages, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            host(full_pages, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            host(torch.tensor([start], dtype=torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            host(cos_values, ttnn.bfloat16, ttnn.TILE_LAYOUT),
+            host(sin_values, ttnn.bfloat16, ttnn.TILE_LAYOUT),
+        )
+        buffers = self._prefill_inputs.get(size)
+        if buffers is None:
+            buffers = tuple(ttnn.to_device(source, self.target.mesh_device) for source in sources)
+            self._prefill_inputs[size] = buffers
+        else:
+            for source, buffer in zip(sources, buffers, strict=True):
+                ttnn.copy_host_to_device_tensor(source, buffer)
+        ids, chunk_pages, table, offset, cos, sin = buffers
         normalized = self.target.norm(hidden, mode=Mode.PREFILL)
         self.prefill(ids, normalized, cos, sin, table, chunk_pages, start, offset)
-        for tensor in (ids, normalized, cos, sin, table, chunk_pages, offset):
-            ttnn.deallocate(tensor)
+        ttnn.deallocate(normalized)
 
     def retain_prefill_hidden(self, hidden: ttnn.Tensor) -> None:
         """Retain the exact normalized row used for the prompt's target logits.
@@ -347,7 +534,11 @@ class Qwen36MTP:
         hypothesis: first-anchor prediction detects wrong row selection or alias reuse.
         """
         if self._prefill_tokens is not None:
-            self.previous_hidden[self._prefill_slot] = ttnn.clone(hidden)
+            previous = self.previous_hidden.get(self._prefill_slot)
+            if previous is None:
+                self.previous_hidden[self._prefill_slot] = ttnn.clone(hidden)
+            else:
+                ttnn.copy(hidden, previous)
 
 
 class Qwen36MTPVerifier:
@@ -374,6 +565,19 @@ class Qwen36MTPVerifier:
         self.count = 0
         self.start_position = 0
         self.slot = -1
+
+    def release(self) -> None:
+        """Discard verifier buffers after caller-owned verification traces are released.
+
+        requires: no concurrent verifier execution or fold.
+        ensures: target committed state unchanged; pending speculative state discarded.
+            Repeated release is harmless; released verifier must not be reused.
+        """
+        for verifier in self.gdn.values():
+            verifier.release()
+        self.count = 0
+        self.slot = -1
+        self.max_tokens = 0
 
     def verify(
         self,
@@ -402,6 +606,7 @@ class Qwen36MTPVerifier:
         ensures: committed-slot copies stay outside the shared verification trace.
         """
         assert self.count == 0 and self.slot == -1 and start_position >= 0
+        assert self.max_tokens > 0
         for verifier in self.gdn.values():
             verifier.prepare(slot)
         self.slot = slot

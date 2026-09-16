@@ -12,6 +12,7 @@ import math
 import os
 from collections import defaultdict
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Mapping, Optional
 
 import torch
@@ -27,6 +28,7 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 import ttnn
 from models.demos.blackhole.qwen36.tt.common import create_tt_model
 from models.demos.blackhole.qwen36.tt.generator_interface import prefill_dispatch, warmup_decode_buckets
+from models.demos.blackhole.qwen36.tt.mtp import Qwen36MTP
 from models.tt_transformers.tt.generator import Generator
 
 _PREFILL_WARMUP_CHUNK = 2048
@@ -124,8 +126,13 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         max_seq_len,
         tt_data_parallel=1,
         optimizations=None,
+        num_speculative_tokens=0,
         **kwargs,
     ):
+        if not 0 <= num_speculative_tokens <= 31:
+            raise ValueError(f"MTP draft count must be in [0, 31], got {num_speculative_tokens}")
+        if num_speculative_tokens and tt_data_parallel != 1:
+            raise ValueError(f"MTP requires tt_data_parallel=1, got {tt_data_parallel}")
         # Weights dir: MODEL_WEIGHTS_DIR → HF_MODEL → hf_config._name_or_path; a hub id resolves to a local snapshot.
         name_or_path = os.environ.get("MODEL_WEIGHTS_DIR") or os.environ.get("HF_MODEL") or hf_config._name_or_path
         if name_or_path and not os.path.isdir(os.path.expanduser(name_or_path)):
@@ -143,8 +150,16 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         if model_batch != max_batch_size:
             logger.info(f"Rounding max_batch_size {max_batch_size} up to {model_batch} (power-of-two slot count)")
         args, model, _ = create_tt_model(
-            mesh_device, max_batch_size=model_batch, max_seq_len=max_seq_len, hf_model=name_or_path
+            mesh_device,
+            max_batch_size=model_batch,
+            max_seq_len=max_seq_len,
+            hf_model=name_or_path,
+            force_tp=bool(num_speculative_tokens),
         )
+        if num_speculative_tokens:
+            model.mtp = Qwen36MTP.from_pretrained(
+                model, Path(name_or_path).expanduser(), max_verify_tokens=num_speculative_tokens + 1
+            )
         # Attach the TT vision tower so prefill can splice image/video embeddings (multimodal path).
         # No-op cost for text-only requests; get_image_features / get_video_features are only invoked
         # when a request actually carries pixel_values / pixel_values_videos.
