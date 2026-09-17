@@ -125,44 +125,65 @@ class GDNVerification:
         self.count = x.shape[-2]
         return output
 
-    def fold(self, accepted: int) -> None:
-        """Commit accepted verifier inputs, including anchor, using recorded writes.
+    def fold(self, accepted: int | ttnn.Tensor) -> None:
+        """Commit accepted verifier inputs with identical finite-precision replay.
 
-        requires: successful verification; 0 <= accepted <= verified token count;
-            committed layer state has not advanced since verification.
-        ensures: zero acceptance changes nothing; positive acceptance replays identical
-            decay/write rounding and convolution inputs for exactly that prefix.
-            Rejected suffix cannot affect committed state or subsequent decode.
-        intension: no projection, normalization, query or state-read matmul during fold.
+        requires: pending verification; accepted is an integer or device FP32 tiled
+            scalar in [0, count]; committed state has not advanced since verification.
+        ensures: only accepted inputs change state; rejected writes never contribute.
+            Device acceptance stays on device, including convolution-prefix selection.
+        intension: retain one recurrent accumulator, not a state snapshot per token.
         """
-        assert self.count > 0 and 0 <= accepted <= self.count
+        dynamic = isinstance(accepted, ttnn.Tensor)
+        assert self.count > 0
+        if not dynamic:
+            assert 0 <= accepted <= self.count
+        count = self.count if dynamic else accepted
         self.count = 0
-        if accepted == 0:
+        if count == 0:
             return
         layer = self.layer
         h = ttnn.clone(self.checkpoint, memory_config=ttnn.L1_MEMORY_CONFIG)
-        for k, delta, g, beta in self.updates[:accepted]:
-            if h.dtype != k.dtype:
-                converted = ttnn.typecast(h, k.dtype)
-                ttnn.deallocate(h)
-                h = converted
+        for index, (k, delta, g, beta) in enumerate(self.updates[:count]):
+            previous = h
+            operand = h if h.dtype == k.dtype else ttnn.typecast(h, k.dtype)
             decayed = ttnn.multiply(
-                h, g, input_tensor_b_activations=[ttnn.UnaryOpType.EXP], memory_config=ttnn.L1_MEMORY_CONFIG
+                operand,
+                g,
+                input_tensor_b_activations=[ttnn.UnaryOpType.EXP],
+                memory_config=ttnn.L1_MEMORY_CONFIG,
             )
-            ttnn.deallocate(h)
-            h = fused_decay_and_write_ttnn(decayed, k, delta, g, beta, device=layer.mesh, apply_decay=False)
+            if operand is not previous:
+                ttnn.deallocate(operand)
+            updated = fused_decay_and_write_ttnn(decayed, k, delta, g, beta, device=layer.mesh, apply_decay=False)
             ttnn.deallocate(decayed)
-            if h.dtype != self.checkpoint.dtype:
-                converted = ttnn.typecast(h, self.checkpoint.dtype)
-                ttnn.deallocate(h)
-                h = converted
-        convs = [
-            ttnn.clone(
-                self.checkpoint_convs[index + accepted]
-                if index + accepted < layer.K
-                else self.conv_inputs[index + accepted - layer.K],
-                memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            )
-            for index in range(layer.K)
-        ]
+            if updated.dtype != self.checkpoint.dtype:
+                converted = ttnn.typecast(updated, self.checkpoint.dtype)
+                ttnn.deallocate(updated)
+                updated = converted
+            if dynamic:
+                active = ttnn.typecast(ttnn.gt(accepted, index), previous.dtype)
+                h = ttnn.where(active, updated, previous, memory_config=ttnn.L1_MEMORY_CONFIG)
+                ttnn.deallocate(active)
+                ttnn.deallocate(updated)
+            else:
+                h = updated
+            ttnn.deallocate(previous)
+        convs = []
+        for tap in range(layer.K):
+            if dynamic:
+                selected = ttnn.clone(self.checkpoint_convs[tap])
+                for prefix in range(1, count + 1):
+                    offset = tap + prefix
+                    source = self.checkpoint_convs[offset] if offset < layer.K else self.conv_inputs[offset - layer.K]
+                    active = ttnn.reshape(ttnn.typecast(ttnn.eq(accepted, prefix), source.dtype), (1, 1, 1))
+                    updated = ttnn.where(active, source, selected)
+                    ttnn.deallocate(active)
+                    ttnn.deallocate(selected)
+                    selected = updated
+            else:
+                offset = tap + accepted
+                source = self.checkpoint_convs[offset] if offset < layer.K else self.conv_inputs[offset - layer.K]
+                selected = ttnn.clone(source, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            convs.append(selected)
         layer.write_slot(self.slot, h, convs)

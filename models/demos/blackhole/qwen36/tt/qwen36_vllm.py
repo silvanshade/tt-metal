@@ -29,6 +29,7 @@ import ttnn
 from models.demos.blackhole.qwen36.tt.common import create_tt_model
 from models.demos.blackhole.qwen36.tt.generator_interface import prefill_dispatch, warmup_decode_buckets
 from models.demos.blackhole.qwen36.tt.mtp import Qwen36MTP
+from models.demos.blackhole.qwen36.tt.mtp_round import Qwen36MTPRound
 from models.tt_transformers.tt.generator import Generator
 
 _PREFILL_WARMUP_CHUNK = 2048
@@ -61,6 +62,7 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         "supports_prefix_caching": False,
         "supports_async_decode": False,
         "supports_sample_on_device": True,
+        "supports_native_mtp": True,
     }
 
     def _validate_device_sampling_request(self, requested):
@@ -457,4 +459,19 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         if enable_trace:
             self.mesh_device.enable_program_cache()
             self.mesh_device.set_program_cache_misses_allowed(False)
-        return warmup_decode_buckets(self, super().warmup_model_decode, *args, **kwargs)
+        result = warmup_decode_buckets(self, super().warmup_model_decode, *args, **kwargs)
+        mtp = getattr(self.model[0], "mtp", None)
+        if mtp is not None:
+            if not enable_trace and getattr(self, "mtp_round", None) is None:
+                self.mtp_round = Qwen36MTPRound(mtp, kwargs["num_blocks"])
+                self.mtp_round.warmup()
+            elif enable_trace and not self.mtp_round.traces:
+                self.mtp_round.capture()
+        return result
+
+    def release_persistent_capture(self) -> None:
+        """Release native round traces before the worker closes its mesh."""
+        round_runner = getattr(self, "mtp_round", None)
+        if round_runner is not None:
+            round_runner.release()
+            self.mtp_round = None

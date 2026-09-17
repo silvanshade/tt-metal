@@ -445,3 +445,75 @@ def test_attention_tp_qknorm_offset(mesh_device):
     ), f"k_norm must load WITH +1 (uniform-attention fix), but |loaded-raw|={k_err_raw:.4f} (regressed +1?)"
     assert q_err_plus1 < 0.05, "sanity: loaded q_norm must equal raw+1"
     logger.info("PASSED: 27B-TP q_norm/k_norm loaded WITH the +1 offset (uniform-attention fix)")
+
+
+@torch.no_grad()
+@parametrize_mesh_tp()
+def test_attention_tp_verify_cache_lifetime(mesh_device, reset_seeds, ensure_gc):
+    """Shared-sequence writes preserve K/V under page-table allocation pressure."""
+    os.environ.setdefault("HF_MODEL", model_path())
+    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256, force_tp=True)
+    layer = next(i for i, kind in enumerate(args.attention_type_list) if kind == "full_attention")
+    from models.tt_transformers.tt.ccl import TT_CCL
+
+    ccl = TT_CCL(mesh_device) if mesh_device.get_num_devices() > 1 else None
+    weights = load_attention_weights_tp(mesh_device, load_attn_layer(args.CKPT_DIR, layer), args)
+    attention = TPAttention(mesh_device, args, weights, ccl)
+    mapper = ttnn.ReplicateTensorToMesh(mesh_device)
+    composer = ttnn.ConcatMeshToTensor(mesh_device, dim=0)
+
+    def indices(value):
+        return ttnn.from_torch(value, dtype=ttnn.int32, device=mesh_device, mesh_mapper=mapper)
+
+    # Wide page rows allocate between padding and each shared-sequence cache write.
+    pages = torch.zeros(1, 2048, dtype=torch.int32)
+    pages[0, :4] = torch.arange(4)
+    page_table = indices(pages)
+    verify_pages = indices(pages.repeat(6, 1))
+    initial = [torch.zeros(2048, args.n_local_kv_heads, 64, args.head_dim, dtype=torch.bfloat16) for _ in range(2)]
+    for cache in initial:
+        cache[:4].normal_()
+    inputs = torch.randn(1, 1, 7, args.dim, dtype=torch.bfloat16)
+
+    def bind_cache():
+        caches = tuple(
+            ttnn.from_torch(
+                value, dtype=ttnn.bfloat8_b, layout=ttnn.TILE_LAYOUT, device=mesh_device, mesh_mapper=mapper
+            )
+            for value in initial
+        )
+        attention.set_paged_kv_cache(*caches)
+        return caches
+
+    def decode(index):
+        position = torch.tensor([126 + index], dtype=torch.int32)
+        cos, sin = rot_mats_decode(mesh_device, args.rope_head_dim, args.max_seq_len, args.rope_theta, position)
+        output = attention.forward_decode(
+            replicate_to_device(mesh_device, inputs[:, :, index : index + 1]), indices(position), cos, sin, page_table
+        )
+        result = ttnn.to_torch(output, mesh_composer=tp_composer(mesh_device))
+        ttnn.deallocate(output)
+        return result
+
+    caches = bind_cache()
+    expected_outputs = torch.cat([decode(index) for index in range(6)], dim=2)
+    expected_cache = [ttnn.to_torch(cache, mesh_composer=composer).clone() for cache in caches]
+    expected_continuation = decode(6)
+    for cache in caches:
+        ttnn.deallocate(cache)
+
+    caches = bind_cache()
+    positions = torch.arange(126, 132, dtype=torch.int32)
+    cos, sin = rot_mats_decode(mesh_device, args.rope_head_dim, args.max_seq_len, args.rope_theta, positions)
+    output = attention.forward_verify(
+        replicate_to_device(mesh_device, inputs[:, :, :6]), indices(positions), cos, sin, verify_pages
+    )
+    torch.testing.assert_close(
+        ttnn.to_torch(output, mesh_composer=tp_composer(mesh_device)), expected_outputs, rtol=0, atol=0
+    )
+    ttnn.deallocate(output)
+    for cache, expected in zip(caches, expected_cache):
+        torch.testing.assert_close(ttnn.to_torch(cache, mesh_composer=composer), expected, rtol=0, atol=0)
+    torch.testing.assert_close(decode(6), expected_continuation, rtol=0, atol=0)
+    for cache in caches:
+        ttnn.deallocate(cache)

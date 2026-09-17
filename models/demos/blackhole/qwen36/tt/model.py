@@ -1075,9 +1075,14 @@ class Qwen36Model:
             )
         assert self._deltanet_external_states is not None, "Call allocate_kv_caches first"
         assert chunk_size % 128 == 0, f"chunk_size {chunk_size} must be a multiple of 128"
-        B = 1
         block_size = get_block_size(self._paged_kv_caches)
         blocks_per_chunk = chunk_size // block_size
+
+        if self._chunk_token_buf is not None and (
+            self._chunked_chunk_size != chunk_size
+            or tuple(self._chunk_full_page_table_buf.shape) != tuple(page_table.shape)
+        ):
+            raise ValueError("Prefill buffer geometry cannot change after warmup")
 
         if self._chunked_trace_id is not None:
             ttnn.release_trace(device, self._chunked_trace_id)
@@ -1090,35 +1095,32 @@ class Qwen36Model:
         # is captured), never at request time. Zero-initialised -> identity for text-only.
         self._alloc_vision_merge_buffers(device, chunk_size)
 
-        # ---- Persistent per-chunk input buffers (addresses baked into the trace) ----
-        self._chunk_token_buf = ttnn.from_torch(
-            torch.zeros(B, chunk_size, dtype=torch.int32),
-            dtype=ttnn.uint32,
-            layout=ttnn.ROW_MAJOR_LAYOUT,
-            device=device,
+        # Keep inputs alive across eager warmup and capture, as in the TP path.
+        inputs = (
+            ("_chunk_token_buf", torch.zeros(1, chunk_size, dtype=torch.int32), ttnn.uint32, ttnn.ROW_MAJOR_LAYOUT),
+            ("_chunk_start_idx_tensor", torch.zeros(1, dtype=torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            ("_chunk_full_page_table_buf", page_table, ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            ("_chunk_page_table_buf", page_table[:, :blocks_per_chunk].contiguous(), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT),
+            (
+                "_chunk_cos_buf",
+                self.rope.cos_cpu[:chunk_size].unsqueeze(0).contiguous(),
+                ttnn.bfloat16,
+                ttnn.TILE_LAYOUT,
+            ),
+            (
+                "_chunk_sin_buf",
+                self.rope.sin_cpu[:chunk_size].unsqueeze(0).contiguous(),
+                ttnn.bfloat16,
+                ttnn.TILE_LAYOUT,
+            ),
         )
-        self._chunk_start_idx_tensor = ttnn.from_torch(
-            torch.zeros(1, dtype=torch.int32), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=device
-        )
-        self._chunk_full_page_table_buf = ttnn.from_torch(
-            page_table, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=device
-        )
-        self._chunk_page_table_buf = ttnn.from_torch(
-            page_table[:, :blocks_per_chunk].contiguous(), dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT, device=device
-        )
-        # TP handoff: add ReplicateTensorToMesh for cos/sin (parity with tt/rope.py).
-        self._chunk_cos_buf = ttnn.from_torch(
-            self.rope.cos_cpu[:chunk_size].unsqueeze(0).contiguous(),
-            dtype=ttnn.bfloat16,
-            layout=ttnn.TILE_LAYOUT,
-            device=device,
-        )
-        self._chunk_sin_buf = ttnn.from_torch(
-            self.rope.sin_cpu[:chunk_size].unsqueeze(0).contiguous(),
-            dtype=ttnn.bfloat16,
-            layout=ttnn.TILE_LAYOUT,
-            device=device,
-        )
+        for name, value, dtype, layout in inputs:
+            host = ttnn.from_torch(value, dtype=dtype, layout=layout)
+            buffer = getattr(self, name)
+            if buffer is None:
+                setattr(self, name, ttnn.to_device(host, device))
+            else:
+                ttnn.copy_host_to_device_tensor(host, buffer)
 
         # Bind GDN to persistent external state; enable in-place carry across replays.
         for layer, (ext_rec, ext_conv) in zip(
@@ -1147,6 +1149,10 @@ class Qwen36Model:
             self._chunk_full_page_table_buf,
             self._chunk_page_table_buf,
         )
+        # Allocate the retained output before decode capture and warm its copy.
+        if self._chunked_trace_output is None:
+            self._chunked_trace_output = ttnn.empty_like(warmup_out)
+        ttnn.copy(warmup_out, self._chunked_trace_output)
         ttnn.deallocate(warmup_out)
         ttnn.synchronize_device(device)
 
@@ -1160,7 +1166,7 @@ class Qwen36Model:
         if not capture_chunk_trace:
             return
         self._chunked_trace_id = ttnn.begin_trace_capture(device, cq_id=0)
-        self._chunked_trace_output = self._forward_prefill_chunk(
+        trace_out = self._forward_prefill_chunk(
             self._chunk_token_buf,
             self._chunk_cos_buf,
             self._chunk_sin_buf,
@@ -1168,6 +1174,8 @@ class Qwen36Model:
             self._chunk_full_page_table_buf,
             self._chunk_page_table_buf,
         )
+        ttnn.copy(trace_out, self._chunked_trace_output)
+        ttnn.deallocate(trace_out)
         ttnn.end_trace_capture(device, self._chunked_trace_id, cq_id=0)
         logger.info("Chunked prefill trace captured successfully!")
 
