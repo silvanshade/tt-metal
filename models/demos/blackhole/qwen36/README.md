@@ -115,7 +115,7 @@ The captured verifier contains no committed-slot selection, so requests with the
 
 Native `initialize_vllm_model(..., num_speculative_tokens=K)` loads and attaches MTP before cache allocation, selects the TP modules even for a single request, and bounds verification tapes to `K + 1` inputs (drafts plus anchor). Supported `K` is 1–31 with `tt_data_parallel=1`; zero leaves MTP disabled. Draft loading follows the target's surrounding weight-conversion context. Direct native callers can instead attach `Qwen36MTP.from_pretrained(..., max_verify_tokens=N)` to `model.mtp`; its default bound remains 32.
 
-The TP allocator creates independent BFP8 draft KV with the same physical page IDs. The target's recurrent-slot remap also transfers owned hidden feedback; paged KV stays in place and follows request page tables. Native prefill warmup compiles the draft observer alongside target chunks and masked buckets. Observer inputs remain allocated per bucket; request-time host uploads reuse them. Plugin admission, speculative trace orchestration and scheduling remain separate integration requirements.
+The TP allocator creates independent BFP8 draft KV with the same physical page IDs. The target's recurrent-slot remap also transfers owned hidden feedback; paged KV stays in place and follows request page tables. Native prefill warmup compiles the draft observer alongside target chunks and masked buckets. Observer inputs remain allocated per bucket; request-time host uploads reuse them. The serving wrapper owns the captured round lifecycle below; the plugin supplies scheduling and target sampling policy.
 
 Per-slot feedback storage is allocated with draft caches, before any trace capture. Prefill replaces its contents without replacing its allocation; slot remapping transfers buffer ownership.
 
@@ -128,6 +128,16 @@ Release caller-owned decode, bucket-prefill and verification traces before `mode
 `proposal_step(...)` returns borrowed logits and normalized hidden state, overwritten by the next replay. The preceding borrowed hidden state can feed the next recursive step directly. Caller device buffers must be allocated before capture; update their contents through host-to-device copies. Draft cache positions are absolute token positions minus one, while rotary tensors encode absolute positions.
 
 Warmup and capture write draft KV. Restore request cache contents before inference when warmup touched live pages. Call `release_proposal()` before freeing draft KV or weights; it releases the trace before its persistent buffers. Sampling and accepted-prefix target feedback remain caller responsibilities.
+
+## Captured MTP rounds
+
+The serving wrapper owns `Qwen36MTPRound`: it allocates frames and warms every count and request slot before capturing ordinary decode or speculative traces. Greedy execution uses one trace for target verification, first-mismatch acceptance, finite-precision GDN fold, target-hidden selection, shifted teacher alignment and recursive device-argmax drafting. Its host result contains only accepted count, correction token, draft extent and draft IDs; target logits and hidden rows remain on device.
+
+Target policies that require host sampling use the same device drafter with two captured phases: verification exports target logits, and finalization consumes the accepted count and correction token. The caller evaluates target rows only through the first mismatch or stopping boundary. Accepted input history and hidden feedback exclude the correction token until its next target pass.
+
+Frames are shared serially across request slots; captured checkpoint/fold operations address each slot's authoritative state. Stage request token IDs, page table, position, rotary delta and remaining budget before replay. Feedback is copied into the currently owned per-slot buffer after replay so slot remapping cannot leave a trace targeting obsolete feedback storage. Round outputs are borrowed until the next replay.
+
+Reserve trace memory separately from KV capacity: command storage grows with draft count and request slots. `release_persistent_capture()` releases round traces before frames and cache storage. Reallocation requires fresh warmup and capture.
 
 ## End-to-end demo test (`demo/text_demo.py`)
 
