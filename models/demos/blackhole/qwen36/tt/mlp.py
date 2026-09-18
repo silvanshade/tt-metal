@@ -50,21 +50,20 @@ def _build_gate_up(gate_w, up_w, mesh, tp, cache_path):
 def load_mlp_weights(mesh_device, state_dict, tensor_cache_path=None, args=None, use_gateup_agmm=True) -> MLPWeights:
     """Per-layer MLP state: gate_proj, down_proj, up_proj weights."""
     tp = getattr(args, "num_devices", 1) if args is not None else 1
+    # DRAM-WIDTH_SHARDED decode weights (QWEN36_DECODE_MATMUL=dram_sharded). Cache uses `.dramshard`
+    # — layout incompatible with the interleaved cache (as_tensor ignores the requested memcfg on
+    # reload) — so both arms' caches coexist. The 1D arm needs interleaved weights (its mcast decode
+    # matmul reads in0/in1 interleaved).
+    dram_sharded = (
+        args is not None
+        and getattr(args, "mlp_w1_weight_memcfg", None) is not None
+        and not getattr(args, "mlp_1d_decode", False)
+    )
 
-    if tp > 1:
+    if tp > 1 or dram_sharded:
         # TP: w1/w3 column-parallel (shard out dim), w2 row-parallel (shard in dim).
-        # DRAM-sharded memcfgs from args.
+        # At TP=1 the mesh split is a no-op and this branch exists for the DRAM-sharded layout.
         from models.demos.blackhole.qwen36.tt import tp_common as tpc
-
-        # w1/w3 DRAM-WIDTH_SHARDED for decode (M=1 tile, ~+10% tok/s); w2 interleaved.
-        # Cache uses `.dramshard` suffix — layout incompatible with interleaved cache
-        # (as_tensor ignores requested memcfg on reload). Fallback if memcfgs absent.
-        # 1D-decode (default) uses interleaved weights (its mcast decode matmul needs them).
-        dram_sharded = (
-            args is not None
-            and getattr(args, "mlp_w1_weight_memcfg", None) is not None
-            and not getattr(args, "mlp_1d_decode", False)
-        )
 
         def cache(name, tag=""):
             return str(tensor_cache_path / f"mlp.{name}.weight{tag}.tp") if tensor_cache_path else None
@@ -104,8 +103,8 @@ def load_mlp_weights(mesh_device, state_dict, tensor_cache_path=None, args=None,
                     state_dict["down_proj.weight"],
                     mesh_device,
                     dim=0,
-                    memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                    cache_path=cache("down_proj"),
+                    memory_config=args.mlp_w2_weight_memcfg,
+                    cache_path=cache("down_proj", ".dramshard"),
                     dtype=ttnn.bfloat8_b,
                 ),
                 w_gate_up=wgu,
@@ -167,15 +166,11 @@ class Qwen36MLP:
         self.args = args
         self.tt_ccl = tt_ccl
         self.num_devices = getattr(args, "num_devices", 1) if args is not None else 1
-        # 1D-decode (default): small-grid 1D matmuls beat the ~80-core DRAM-sharded grid on the
-        # bandwidth-bound skinny decode MLP matmuls (see test_mlp_matmul_sweep). Forces interleaved weights.
+        # Decode layout (QWEN36_DECODE_MATMUL): exactly one of these is true on the decode path.
         self._mlp_1d_decode = args is not None and getattr(args, "mlp_1d_decode", False)
         # Match load_mlp_weights dram_sharded condition for layout consistency.
         self._dram_sharded = (
-            self.num_devices > 1
-            and args is not None
-            and getattr(args, "mlp_w1_weight_memcfg", None) is not None
-            and not self._mlp_1d_decode
+            args is not None and getattr(args, "mlp_w1_weight_memcfg", None) is not None and not self._mlp_1d_decode
         )
         # Prefill fused-swiglu AGMM (ff_norm skips its AG; layer.py sets _fuse_ff_agmm to match).
         from models.demos.blackhole.qwen36.tt import tp_common as tpc
@@ -295,10 +290,17 @@ class Qwen36MLP:
             pc_up = tpc.create_prefill_mlp_matmul_program_config(
                 seq, args.dim, w.w3.shape[-1], max_cols=_gw, tuning=_pt
             )
-            if pc_gate is None or pc_up is None:
-                # Full-width weights (TP=1 running the sharded modules): the tuned 2D block does not
-                # fit L1 (tp_common.create_prefill_matmul_program_config) and neither does the
-                # [seq, N] output, so run the auto matmul to DRAM with the activation on the op.
+            if (pc_gate is None or pc_up is None) and self._dram_sharded:
+                # Sharded weights at full width: ttnn's fallback rejects a sharded in1, so run the
+                # row-sliced 2D matmul (SILU fused in the slice config).
+                w1_out = tpc.prefill_matmul_sharded_weight(
+                    x, w.w1, ckc, args.dim, fused_activation=ttnn.UnaryOpType.SILU, max_cols=_gw, tuning=_pt
+                )
+                w3_out = tpc.prefill_matmul_sharded_weight(x, w.w3, ckc, args.dim, max_cols=_gw, tuning=_pt)
+            elif pc_gate is None or pc_up is None:
+                # Full-width interleaved weights (TP=1 running the sharded modules): the tuned 2D
+                # block does not fit L1 (tp_common.create_prefill_matmul_program_config) and neither
+                # does the [seq, N] output, so run the auto matmul to DRAM with the activation on it.
                 w1_out = ttnn.linear(x, w.w1, activation="silu", compute_kernel_config=ckc, memory_config=mc)
                 w3_out = ttnn.linear(x, w.w3, compute_kernel_config=ckc, memory_config=mc)
             else:
@@ -334,9 +336,19 @@ class Qwen36MLP:
                 hidden = ttnn.mul(w1_act, w3_out, memory_config=mc_out)
                 ttnn.deallocate(w1_act)
             ttnn.deallocate(w3_out)
-        # Prefill w2: 2D progcfg on (8,10); decode (M<=32) keeps ttnn-auto.
+        # Prefill w2: 2D progcfg on (8,10); decode picks the layout arm.
         w2_pc = None
-        if self._mlp_1d_decode and hidden.shape[-2] <= ttnn.TILE_SIZE:
+        _w2_sharded = (
+            self._dram_sharded
+            and hidden.shape[-2] <= ttnn.TILE_SIZE
+            and getattr(args, "mlp_w2_weight_memcfg", None) is not None
+        )
+        if _w2_sharded:
+            # DRAM-WIDTH_SHARDED decode down-proj: the widest K here (hidden_dim) is where the
+            # sharded kernel gains most over the 1D one (1.51x measured).
+            hidden = ttnn.to_memory_config(hidden, args.act_shard_ff)
+            w2_pc = args.mlp_w2_progcfg
+        elif self._mlp_1d_decode and hidden.shape[-2] <= ttnn.TILE_SIZE:
             # 1D mcast decode down-proj on a small explicit grid (~16 cores).
             w2_pc = args.mlp_w2_decode_1d_progcfg
         elif hidden.shape[-2] > ttnn.TILE_SIZE:
@@ -353,9 +365,30 @@ class Qwen36MLP:
         # validated sweep outL1 config; tt_all_reduce already consumes an L1 partial). A None config
         # (full-width weights, block does not fit L1) means the output does not fit either: DRAM.
         mc_w2_out = (
-            ttnn.L1_MEMORY_CONFIG if (x.shape[-2] <= ttnn.TILE_SIZE or (_prefill_tuned and w2_pc is not None)) else mc
+            ttnn.L1_WIDTH_SHARDED_MEMORY_CONFIG
+            if _w2_sharded
+            else (
+                ttnn.L1_MEMORY_CONFIG
+                if (x.shape[-2] <= ttnn.TILE_SIZE or (_prefill_tuned and w2_pc is not None))
+                else mc
+            )
         )
-        partial = ttnn.linear(hidden, w.w2, compute_kernel_config=ckc, memory_config=mc_w2_out, program_config=w2_pc)
+        if w2_pc is None and self._dram_sharded and hidden.shape[-2] > ttnn.TILE_SIZE:
+            # Sharded w2 at full width: row-sliced 2D matmul (ttnn's fallback rejects a sharded in1).
+            partial = tpc.prefill_matmul_sharded_weight(
+                hidden,
+                w.w2,
+                ckc,
+                hidden.shape[-1],
+                max_cols=getattr(args, "decode_grid_w", 8),
+                tuning=getattr(args, "prefill_tuning", None),
+            )
+        else:
+            partial = ttnn.linear(
+                hidden, w.w2, compute_kernel_config=ckc, memory_config=mc_w2_out, program_config=w2_pc
+            )
+        if _w2_sharded:
+            partial = ttnn.to_memory_config(partial, ttnn.L1_MEMORY_CONFIG)
         ttnn.deallocate(hidden)
 
         # tt_all_reduce on (1,4) mesh reduce-scatters to hidden dim (dim=3).

@@ -108,8 +108,15 @@ def create_dram_sharded_mem_config(k, n):
     )
 
 
-def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None):
-    """DRAM-sharded matmul program config (decode, small M)."""
+def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None, num_workers_per_dram_bank=1):
+    """DRAM-sharded matmul program config (decode, small M).
+
+    `in0_block_w` is the widest legal block: it must divide the per-core activation width in tiles,
+    `k_tiles / num_cores`. Width dominates the measured rate — at `in0_block_w=1` the sharded matmul
+    runs below the interleaved 1D kernel, at the widest legal block it runs 1.4-1.5x above it
+    (tests/test_decode_matmul_layout_sweep.py). A second reader per bank is worth a further ~1.25x,
+    and is legal only where the per-bank output width in tiles is even.
+    """
     m_tiles = math.ceil(m / TILE_SIZE)
     k_tiles = math.ceil(k / TILE_SIZE)
     n_padded = _roundup(n, TILE_SIZE * DRAM_CORES)
@@ -123,14 +130,16 @@ def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None):
     if k_tiles_per_core == 0:
         k_tiles_per_core = k_tiles
         num_cores = 1
-    in0_block_w = _find_largest_divisor(k_tiles_per_core)
+    in0_block_w = _find_largest_divisor(k_tiles_per_core, max_div=k_tiles_per_core)
     per_core_N = n_tiles // num_cores if n_tiles >= num_cores else 1
+    workers = num_workers_per_dram_bank if (n_tiles // DRAM_CORES) % num_workers_per_dram_bank == 0 else 1
 
     return ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig(
         in0_block_w=in0_block_w,
         per_core_M=m_tiles,
         per_core_N=per_core_N,
         fused_activation=None,
+        num_workers_per_dram_bank=workers,
     )
 
 
@@ -332,6 +341,84 @@ def create_prefill_mlp_matmul_program_config(m, k, n, fused_activation=None, max
     return create_prefill_matmul_program_config(
         m, k, n, grid_size=(cols, grid[1]), fused_activation=fused_activation, tuning=tuning
     )
+
+
+def prefill_matmul_sharded_weight(x, weight, compute_cfg, k, fused_activation=None, max_cols=None, tuning=None):
+    """Prefill matmul against a DRAM-WIDTH_SHARDED weight (the dram_sharded decode layout).
+
+    ttnn's own selector falls back to MatmulMultiCoreProgramConfig, which rejects a sharded in1
+    ("Input B memory layout must be INTERLEAVED"), so an explicit 2D config is mandatory here. At
+    TP=1 the tuned full-width block does not fit L1, so widen the grid (smaller per-core output
+    block), then narrow the K block, and only then slice the rows — cheapest accommodation first:
+    a narrower K block makes more passes over the same data, a row slice re-reads the whole weight.
+    The subblock-first width of `create_prefill_mlp_matmul_program_config` is deliberately not used;
+    at full width it picks a 3-wide grid whose per-core block cannot fit at any K block.
+    """
+    seq = x.shape[-2]
+    n = weight.shape[-1]
+    base = tuning or _PREFILL_TUNING[4]
+    grid = prefill_grid_default()
+    caps = sorted({c for c in (base["in0_block_w_cap"], 4, 2, 1) if c <= base["in0_block_w_cap"]}, reverse=True)
+    widths = range(min(max_cols or grid[0], PREFILL_MAX_COLS_PORTABLE, math.ceil(n / TILE_SIZE)), 0, -1)
+
+    def fits(pc):
+        # Stricter than `_prefill_2d_fits_l1`: the kernel keeps BOTH the fp32 accumulator and the
+        # output block for [per_core_M, per_core_N], so an output tile costs 4096+2048 B, not 4096.
+        # The laxer estimate admits configs the program build then rejects (measured: a 4x68 block
+        # at in0_block_w=1 allocates 1877504 B against the 1572864 B L1).
+        out = pc.per_core_M * pc.per_core_N * (4096 + 2048)
+        in0 = 2 * pc.per_core_M * pc.in0_block_w * 2048
+        in1 = 2 * pc.in0_block_w * pc.per_core_N * 2048
+        return out + in0 + in1 <= _L1_CB_BUDGET
+
+    def pc_for(m):
+        for cols in widths:
+            for cap in caps:
+                pc = create_prefill_matmul_program_config(
+                    m,
+                    k,
+                    n,
+                    grid_size=(cols, grid[1]),
+                    fused_activation=fused_activation,
+                    tuning=dict(base, in0_block_w_cap=cap),
+                )
+                if pc is not None and fits(pc):
+                    return pc
+        return None
+
+    rows = seq
+    while rows > TILE_SIZE and pc_for(rows) is None:
+        rows //= 2
+    if pc_for(rows) is None:
+        raise RuntimeError(f"no prefill config fits L1 for sharded weight [{k},{n}] at any row block")
+    if rows == seq:
+        return ttnn.linear(
+            x,
+            weight,
+            compute_kernel_config=compute_cfg,
+            program_config=pc_for(seq),
+            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        )
+    parts = []
+    for start in range(0, seq, rows):
+        m = min(rows, seq - start)
+        starts, ends = [0] * len(x.shape), list(x.shape)
+        starts[-2], ends[-2] = start, start + m
+        x_part = ttnn.slice(x, starts, ends)
+        parts.append(
+            ttnn.linear(
+                x_part,
+                weight,
+                compute_kernel_config=compute_cfg,
+                program_config=pc_for(m),
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            )
+        )
+        ttnn.deallocate(x_part)
+    out = ttnn.concat(parts, dim=-2, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+    for p in parts:
+        ttnn.deallocate(p)
+    return out
 
 
 # Mesh tensor helpers
@@ -658,6 +745,10 @@ def sharded_decode_matmul(
             ttnn.deallocate(x_sh)
         return ttnn.to_memory_config(out, decode_out_memory_config)
     pc = prefill_progcfg_fn(seq, prefill_k, weight.shape[-1])
+    if pc is None:
+        # Full-width weights (TP=1 on the dram_sharded arm): the tuned block does not fit L1 and
+        # ttnn's fallback rejects a sharded in1, so slice the rows.
+        return prefill_matmul_sharded_weight(x, weight, compute_cfg, prefill_k)
     return ttnn.linear(
         x, weight, compute_kernel_config=compute_cfg, program_config=pc, memory_config=ttnn.DRAM_MEMORY_CONFIG
     )
