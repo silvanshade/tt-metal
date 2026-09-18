@@ -1214,11 +1214,10 @@ class TPGatedDeltaNet:
         z: ttnn.Tensor,
         a: ttnn.Tensor,
         b: ttnn.Tensor,
-        state_update: tuple[ttnn.Tensor, ...] | None = None,
     ) -> ttnn.Tensor:
         """Advance bound recurrence; return gated values before output projection.
 
-        requires: projected rows fit bound state; optional tape matches recurrence operands.
+        requires: projected rows fit bound state.
         ensures: decode convolution and recurrence order remain unchanged.
         """
         tw, Nk, Nv, Dk, Dv = self.tw, self.Nk, self.Nv, self.Dk, self.Dv
@@ -1283,7 +1282,6 @@ class TPGatedDeltaNet:
             initial_state=init_state,
             device=self.mesh,
             high_precision=(os.environ.get("QWEN35_GDN_DECODE_BF16") != "1"),
-            state_update=state_update,
         )
         if init_state is not self.rec_state:
             ttnn.deallocate(init_state)
