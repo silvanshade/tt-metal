@@ -234,7 +234,7 @@ class TPAttention:
             if x.shape[-2] > tpc.TILE_SIZE:
                 # Prefill: FPU-tuned 2D config beats ttnn-auto's 1x1 stall; L1 output (gated stays DRAM)
                 # feeds the separate RS. max_cols = device width (11 on BH): wide grid (~10-wide) + the
-                # existing L1-out. See test_mlp_matmul_sweep_prefill.
+                # existing L1-out. Measured during prefill tuning; no sweep in the tree reproduces it.
                 pc = tpc.create_prefill_mlp_matmul_program_config(
                     x.shape[-2],
                     weight.shape[-2],

@@ -17,8 +17,9 @@ from models.tt_transformers.tt.model_config import ModelArgs
 GDN_CONV1D_L1_SMALL_SIZE = 24576
 
 # Decode projection layout when QWEN38_DECODE_MATMUL is unset; see _init_tp_config. Measured on
-# p150a at 23K, no-RT, steps 3-102: dram_sharded runs the ordinary step 5.5 ms and the MTP round
-# 7.2 ms faster (median) than 1d, for +72 ms on the 23K prefill, 32/32 greedy-exact.
+# p150a at 23K, steps 3-102, RT profiler callback on for both arms: dram_sharded runs the ordinary
+# step 5.5 ms and the MTP round 7.2 ms faster (median) than 1d, for +72 ms on the 23K prefill,
+# 32/32 greedy-exact.
 DEFAULT_DECODE_MATMUL = "dram_sharded"
 
 
@@ -249,12 +250,15 @@ class Qwen38ModelArgs(ModelArgs):
             M, self.hidden_dim // tp, self.dim, num_workers_per_dram_bank=_w
         )
 
-        # 1D decode matmuls (QWEN38_DECODE_MATMUL=1d): small grids on interleaved weights.
+        # 1D decode matmuls (QWEN38_DECODE_MATMUL=1d): small grids on interleaved weights. This arm
+        # runs 1.08-1.51x slower than the dram_sharded default on the served decode shapes
+        # (tests/test_decode_matmul_layout_sweep.py, which carries these grids as its 1d control).
         # decode_grid_w = the device worker-grid width (11 on BH P150, 8 on WH). Shaping the 1D-mcast
         # grid WIDE-first (up to this many cols) beats the old cols<=8 shaping by ~2% on this matmul —
-        # a wide-short grid shortens the in0 multicast column (test_mlp_matmul_sweep wide1d_* vs
-        # forced1d_*). Applied to gate/up ONLY (the swept, verified projections); the others below keep
-        # the legacy cols<=8 shaping (grid_w default) until their shapes are swept too.
+        # a wide-short grid shortens the in0 multicast column (measured while tuning this arm; no
+        # sweep in the tree reproduces that wide-versus-tall comparison). Applied to gate/up ONLY
+        # (the swept, verified projections); the others below keep the legacy cols<=8 shaping
+        # (grid_w default) until their shapes are swept too.
         # Both arms' configs are always built; the flags below pick which one each call site takes.
         self.decode_grid_w = mesh_device.compute_with_storage_grid_size().x
         self.mlp_1d_decode = not _dram_sharded
@@ -278,7 +282,8 @@ class Qwen38ModelArgs(ModelArgs):
         )
 
         # Input-projection 1D decode: same idea for attn QKV+gate and GDN QKVZAB in-projections.
-        # Weights load interleaved (prefill AGMM verified bit-identical); tuned grids per test_mlp_matmul_sweep.
+        # Weights load interleaved (prefill AGMM verified bit-identical); tuned grids, carried as the
+        # 1d control of tests/test_decode_matmul_layout_sweep.py.
         self.proj_1d_decode = not _dram_sharded
         self.attn_qkv_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
             M, self.dim, self.attn_qkv_fused_dim_tp, num_cores=64
