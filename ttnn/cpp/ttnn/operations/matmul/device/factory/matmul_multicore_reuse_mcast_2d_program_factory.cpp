@@ -207,102 +207,6 @@ static NamedRuntimeArgs build_in1_receiver_writer_args(
     }
     return args;
 }
-
-// Assigns each in1-sender node the DRAM banks it reads when in1 is DRAM width-sharded.
-//
-// A worker's per_core_N columns rarely line up with a bank's per_core_N_storage columns, so a node
-// may straddle several banks and a bank may feed several nodes. The cursors below carry that
-// running position from one node to the next, which makes this order-dependent: it must be stepped
-// once per in1-sender node, in the grid order the senders are visited. Owning them here keeps five
-// mutable cursors out of the factory's scope, where nothing marked them as sequence-critical.
-class DramWidthShardWalker {
-public:
-    DramWidthShardWalker(
-        uint32_t num_dram_banks, uint32_t per_core_N, uint32_t per_core_N_storage, uint32_t in1_single_tile_size) :
-        num_dram_banks_(num_dram_banks),
-        per_core_N_(per_core_N),
-        per_core_N_storage_(per_core_N_storage),
-        in1_single_tile_size_(in1_single_tile_size) {}
-
-    // Appends this node's vc / shard-count / start-offset args and returns its (stride_bytes,
-    // bank_id) vararg pairs, advancing the cursors to the next node.
-    AdvancedKernelRunArgs::Varargs advance(NamedRuntimeArgs& args) {
-        vc_ = vc_ == 3 ? 0 : vc_ + 1;
-
-        uint32_t num_iter = 0;  // iterate how many banks, till fill the current worker block
-        uint32_t dram_tensor_start_offset = 0;
-        AdvancedKernelRunArgs::Varargs bank_varargs;
-
-        if (curr_storage_core_ < num_dram_banks_) {
-            num_iter++;
-
-            worker_core_stride_ = per_core_N_storage_ - storage_core_stride_;
-
-            dram_tensor_start_offset = storage_core_stride_ * in1_single_tile_size_;
-            bank_varargs.push_back(worker_core_stride_ * in1_single_tile_size_);
-            bank_varargs.push_back(curr_storage_core_);
-
-            log_debug(
-                tt::LogOp,
-                "curr worker core: {} read {} tiles from dram bank: {}, start from index: {}",
-                curr_worker_core_,
-                worker_core_stride_,
-                curr_storage_core_,
-                storage_core_stride_);
-
-            curr_storage_core_ += (storage_core_stride_ + worker_core_stride_) / per_core_N_storage_;
-            storage_core_stride_ = (storage_core_stride_ + worker_core_stride_) % per_core_N_storage_;
-
-            uint32_t curr_worker_core_old = curr_worker_core_;
-            if (worker_core_stride_ >= per_core_N_) {
-                curr_worker_core_ += 1;
-            }
-
-            while (curr_worker_core_ <= curr_worker_core_old and curr_storage_core_ < num_dram_banks_) {
-                num_iter++;
-
-                uint32_t stride = worker_core_stride_ + per_core_N_storage_;
-                stride = std::min(stride, per_core_N_);
-
-                bank_varargs.push_back((stride - worker_core_stride_) * in1_single_tile_size_);
-                bank_varargs.push_back(curr_storage_core_);
-
-                log_debug(
-                    tt::LogOp,
-                    "curr worker core: {} read {} tiles from dram bank: {}, start from index: {}",
-                    curr_worker_core_,
-                    (stride - worker_core_stride_),
-                    curr_storage_core_,
-                    storage_core_stride_);
-
-                if (stride >= per_core_N_) {
-                    curr_worker_core_ += 1;
-                }
-                storage_core_stride_ = (stride - worker_core_stride_) % per_core_N_storage_;
-                curr_storage_core_ += (stride - worker_core_stride_) / per_core_N_storage_;
-                worker_core_stride_ = stride;
-            }
-        }
-        args.emplace_back("vc", vc_);
-        args.emplace_back("num_dram_shards_to_read", num_iter);
-        args.emplace_back("dram_tensor_start_offset", dram_tensor_start_offset);
-        return bank_varargs;
-    }
-
-private:
-    uint32_t num_dram_banks_ = 0;
-    uint32_t per_core_N_ = 0;
-    uint32_t per_core_N_storage_ = 0;
-    uint32_t in1_single_tile_size_ = 0;
-
-    // Carried from one in1-sender node to the next.
-    uint32_t worker_core_stride_ = 0;   // stride in the worker core
-    uint32_t storage_core_stride_ = 0;  // stride in the dram bank
-    uint32_t curr_worker_core_ = 0;     // current worker core
-    uint32_t curr_storage_core_ = 0;    // current read dram bank
-    uint32_t vc_ = 0;
-};
-
 static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spec(
     tt::tt_metal::distributed::MeshDevice& device,
     ComputeHardwareConfig compute_hw,
@@ -388,13 +292,14 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
     // Blackhole's 64B alignment) are padded to it in DRAM. The interleaved reader copies tiles at
     // the padded stride, so the in0/in1/bias buffers must hold entries at the aligned stride and the
     // reader/unpacker walk tiles at the same stride. No-op when already aligned (all bf16 tiles,
-    // 32-wide bfp8, Wormhole). Replaces the staging-buffer workaround. Sharded buffers are backed by
-    // the tensor buffer and keep their natural entry size.
+    // 32-wide bfp8, Wormhole). Replaces the staging-buffer workaround. Only L1-sharded buffers
+    // borrow the tensor's storage; DRAM width shards use the accessor and require alignment.
     const uint32_t dram_alignment = tt::tt_metal::hal::get_dram_alignment();
     uint32_t in0_aligned_tile_size =
         in0_is_sharded ? in0_single_tile_size : tt::align(in0_single_tile_size, dram_alignment);
+    const bool in1_uses_accessor = !in1_is_sharded || (in1_is_width_sharded && in1_tensor.memory_config().is_dram());
     uint32_t in1_aligned_tile_size =
-        in1_is_sharded ? in1_single_tile_size : tt::align(in1_single_tile_size, dram_alignment);
+        in1_uses_accessor ? tt::align(in1_single_tile_size, dram_alignment) : in1_single_tile_size;
     // Bias is DRAM-interleaved; its entries must be padded to the DRAM alignment so the
     // reader's L1 write stride matches the DRAM page stride (e.g. 64B on Blackhole for a
     // 32B (1,16) bf16 bias tile). Without this, L1 dst and DRAM src alignment offsets
@@ -610,18 +515,11 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
         out_block_w % out_subblock_w == 0 and out_block_w >= out_subblock_w,
         "out_block_w must be multiple of out_subblock_w");
 
-    uint32_t num_dram_banks = 0;
-    uint32_t per_core_N_storage = 0;
     uint32_t batches_per_bank = 0;
-    if (in1_is_sharded and in1_is_dram) {
-        num_dram_banks = device.num_dram_channels();
-        if (in1_is_width_sharded) {
-            per_core_N_storage = (N + num_dram_banks - 1) / num_dram_banks;
-        } else {
-            // Height sharded: batches are distributed across DRAM banks
-            uint32_t in1_shard_height_in_tiles = in1_tensor.shard_spec()->shape[0] / in1_tile.get_height();
-            batches_per_bank = in1_shard_height_in_tiles / K;
-        }
+    if (in1_is_height_sharded and in1_is_dram) {
+        // Height-sharded batches are distributed across DRAM banks.
+        uint32_t in1_shard_height_in_tiles = in1_tensor.shard_spec()->shape[0] / in1_tile.get_height();
+        batches_per_bank = in1_shard_height_in_tiles / K;
     }
 
     const auto [in0_tensor_stride_w, in0_tensor_stride_h] =
@@ -721,16 +619,11 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
     if (in1_receiver.num_cores() == 0) {
         mm_kernel_in1_sender_writer_defines["SKIP_MCAST"] = "1";
     }
-    if (in1_is_sharded) {
-        if (in1_is_dram) {
-            if (in1_is_width_sharded) {
-                mm_kernel_in1_sender_writer_defines["IN1_DRAM_WIDTH_SHARDED"] = "1";
-            } else {
-                mm_kernel_in1_sender_writer_defines["IN1_DRAM_HEIGHT_SHARDED"] = "1";
-            }
-        } else {
-            mm_kernel_in1_sender_writer_defines["IN1_SHARDED"] = "1";
-        }
+    // DRAM WIDTH/ND shards use the accessor reader, independent of worker-column boundaries.
+    if (in1_is_height_sharded and in1_is_dram) {
+        mm_kernel_in1_sender_writer_defines["IN1_DRAM_HEIGHT_SHARDED"] = "1";
+    } else if (in1_is_sharded and not in1_is_dram) {
+        mm_kernel_in1_sender_writer_defines["IN1_SHARDED"] = "1";
     }
 
     if (output_is_sharded) {
@@ -953,9 +846,6 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
         }
     }
 
-    // Assigns DRAM banks to in1 sender nodes; only stepped when in1 is DRAM width-sharded.
-    DramWidthShardWalker in1_dram_walker(num_dram_banks, per_core_N, per_core_N_storage, in1_single_tile_size);
-
     uint32_t in0_end_idx = num_blocks_y - 1;
     uint32_t in1_end_idx = num_blocks_x - 1;
 
@@ -972,11 +862,6 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
     // the sender row (or column), the other holds this node's single same-axis coordinate, so the
     // two lists together are always in0_sender_num_cores_along_width + 1 entries.
     const uint32_t num_in0_sender_varargs = in0_block_sharded ? in0_sender_num_cores_along_width + 1 : 0u;
-    // The DRAM-width-sharded in1 sender reads a (stride_bytes, bank_id) pair per DRAM shard it
-    // straddles; cores straddle different numbers of shards, so the lists differ in length and the
-    // shorter ones are padded to the declared maximum below.
-    uint32_t num_in1_writer_varargs = 0;
-    std::map<CoreCoord, AdvancedKernelRunArgs::Varargs> in1_writer_varargs;
 
     // Placement: each node hosts exactly the kernels whose legacy core_ranges contained it. Rather
     // than re-deriving the mcast geometry, record the kernel set per node here and group nodes by it
@@ -1136,14 +1021,6 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
                     /*has_bias=*/bias_mesh.has_value(),
                     output_is_sharded);
 
-                // DRAM width-sharded in1 needs a per-node bank assignment; height-sharded needs none
-                // (bank and offset come from compile-time args plus the batch index).
-                if (in1_is_sharded and in1_is_dram and in1_is_width_sharded) {
-                    AdvancedKernelRunArgs::Varargs bank_varargs = in1_dram_walker.advance(args);
-                    num_in1_writer_varargs =
-                        std::max<uint32_t>(num_in1_writer_varargs, static_cast<uint32_t>(bank_varargs.size()));
-                    in1_writer_varargs[core] = std::move(bank_varargs);
-                }
                 add_runtime_args(in1_sender_writer_run_args.runtime_arg_values, core, args);
                 kernels_here.push_back(IN1_SENDER_WRITER);
 
@@ -1182,14 +1059,6 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
         place(core, kernels_here);
     }
 
-    // Cores straddle different numbers of DRAM shards, so the per-core lists built above have
-    // different lengths -- but the KernelSpec declares one vararg-buffer size for all of them (the
-    // max). Pad the short ones to it; the kernel's loop is bounded by each core's own
-    // num_dram_shards_to_read, so it never reads the padding.
-    for (auto& [core, varargs] : in1_writer_varargs) {
-        varargs.resize(num_in1_writer_varargs, 0u);
-        in1_sender_writer_run_args.advanced_options.runtime_varargs[core] = std::move(varargs);
-    }
     ////////////////////////////////////////////////////////////////////////////
     //                      Build KernelSpecs
     ////////////////////////////////////////////////////////////////////////////
@@ -1508,8 +1377,8 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
             in1_sender_rtas.emplace_back("in3_tensor_start_tile_id");
         }
         if (!(in1_is_sharded and not in1_is_dram)) {
-            // The interleaved and DRAM-sharded paths both page (or bank-address) through in1; only
-            // the L1-sharded path reads it out of the borrowed buffer instead.
+            // The interleaved and DRAM-sharded paths bind in1 by tensor tile; only the
+            // L1-sharded path reads it through a borrowed buffer.
             in1_sender_writer.tensor_bindings.push_back(TensorBinding{
                 .tensor_parameter_name = IN1,
                 .accessor_name = "in1",
@@ -1518,21 +1387,10 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_in1_spe
         if (!output_is_sharded) {
             in1_sender_rtas.emplace_back("last_num_blocks_w_dim");
         }
-        if (in1_is_sharded and in1_is_dram) {
-            if (in1_is_width_sharded) {
-                in1_sender_writer.compile_time_args.insert(
-                    {"in1_dram_block_num_tiles", (std::uint32_t)per_core_N_storage * in0_block_w});
-                in1_sender_writer.compile_time_args.insert(
-                    {"in1_block_w_dram_bytes", (std::uint32_t)per_core_N_storage * in1_single_tile_size});
-                in1_sender_rtas.emplace_back("vc");
-                in1_sender_rtas.emplace_back("num_dram_shards_to_read");
-                in1_sender_rtas.emplace_back("dram_tensor_start_offset");
-                in1_sender_writer.advanced_options.num_runtime_varargs = num_in1_writer_varargs;
-            } else {
-                // Height sharded: pass tiles per batch and batches per bank
-                in1_sender_writer.compile_time_args.insert({"in1_KtNt_per_batch", (std::uint32_t)(K * N)});
-                in1_sender_writer.compile_time_args.insert({"in1_batches_per_bank", batches_per_bank});
-            }
+        if (in1_is_height_sharded and in1_is_dram) {
+            // Height-sharded batches retain their bank-local reader.
+            in1_sender_writer.compile_time_args.insert({"in1_KtNt_per_batch", (std::uint32_t)(K * N)});
+            in1_sender_writer.compile_time_args.insert({"in1_batches_per_bank", batches_per_bank});
         }
         in1_sender_writer.runtime_arg_schema.runtime_arg_names = std::move(in1_sender_rtas);
         kernels.push_back(std::move(in1_sender_writer));
@@ -2037,13 +1895,14 @@ create_program_mcast_in0_in1(
     // Blackhole's 64B alignment) are padded to it in DRAM. The interleaved reader copies tiles at
     // the padded stride, so the in0/in1/bias CBs must hold pages at the aligned stride and the
     // reader/unpacker walk tiles at the same stride. No-op when already aligned (all bf16 tiles,
-    // 32-wide bfp8, Wormhole). Replaces the staging-CB workaround. Sharded CBs are backed by the
-    // tensor buffer and keep their natural page size.
+    // 32-wide bfp8, Wormhole). Replaces the staging-CB workaround. Only L1-sharded CBs borrow
+    // the tensor's storage; DRAM width shards use the accessor and require alignment.
     const uint32_t dram_alignment = tt::tt_metal::hal::get_dram_alignment();
     uint32_t in0_aligned_tile_size =
         in0_is_sharded ? in0_single_tile_size : tt::align(in0_single_tile_size, dram_alignment);
+    const bool in1_uses_accessor = !in1_is_sharded || (in1_is_width_sharded && in1_tensor.memory_config().is_dram());
     uint32_t in1_aligned_tile_size =
-        in1_is_sharded ? in1_single_tile_size : tt::align(in1_single_tile_size, dram_alignment);
+        in1_uses_accessor ? tt::align(in1_single_tile_size, dram_alignment) : in1_single_tile_size;
     // Bias CB pages must be padded to the DRAM alignment so the reader's L1 write stride
     // matches the DRAM page stride (e.g. 64B on Blackhole for a 32B (1,16) bf16 bias tile).
     // Mirrors in0/in1 above and the dram_sharded factory. No-op on Wormhole and for
@@ -2255,18 +2114,11 @@ create_program_mcast_in0_in1(
 
     std::vector<uint32_t> in0_sender_compile_time_args;
 
-    uint32_t num_dram_banks = 0;
-    uint32_t per_core_N_storage = 0;
     uint32_t batches_per_bank = 0;
-    if (in1_is_sharded and in1_is_dram) {
-        num_dram_banks = device.num_dram_channels();
-        if (in1_is_width_sharded) {
-            per_core_N_storage = (N + num_dram_banks - 1) / num_dram_banks;
-        } else {
-            // Height sharded: batches are distributed across DRAM banks
-            uint32_t in1_shard_height_in_tiles = in1_tensor.shard_spec()->shape[0] / in1_tile.get_height();
-            batches_per_bank = in1_shard_height_in_tiles / K;
-        }
+    if (in1_is_height_sharded and in1_is_dram) {
+        // Height-sharded batches are distributed across DRAM banks.
+        uint32_t in1_shard_height_in_tiles = in1_tensor.shard_spec()->shape[0] / in1_tile.get_height();
+        batches_per_bank = in1_shard_height_in_tiles / K;
     }
 
     const auto [in0_tensor_stride_w, in0_tensor_stride_h] =
@@ -2421,15 +2273,10 @@ create_program_mcast_in0_in1(
         tt::tt_metal::TensorAccessorArgs(*bias_mesh).append_to(in1_sender_writer_compile_time_args);
     }
 
-    if (in1_is_sharded and in1_is_dram) {
-        if (in1_is_width_sharded) {
-            in1_sender_writer_compile_time_args.push_back((std::uint32_t)per_core_N_storage * in0_block_w);
-            in1_sender_writer_compile_time_args.push_back((std::uint32_t)per_core_N_storage * in1_single_tile_size);
-        } else {
-            // Height sharded: pass tiles per batch and batches per bank
-            in1_sender_writer_compile_time_args.push_back((std::uint32_t)(K * N));  // KtNt per batch (tiles)
-            in1_sender_writer_compile_time_args.push_back((std::uint32_t)batches_per_bank);
-        }
+    if (in1_is_height_sharded and in1_is_dram) {
+        // Height sharded: pass tiles per batch and batches per bank.
+        in1_sender_writer_compile_time_args.push_back((std::uint32_t)(K * N));
+        in1_sender_writer_compile_time_args.push_back((std::uint32_t)batches_per_bank);
     }
     std::vector<uint32_t> in0_receiver_compile_time_args = {
         // in0 block args
@@ -2526,16 +2373,11 @@ create_program_mcast_in0_in1(
     if (in1_receiver.num_cores() == 0) {
         mm_kernel_in1_sender_writer_defines["SKIP_MCAST"] = "1";
     }
-    if (in1_is_sharded) {
-        if (in1_is_dram) {
-            if (in1_is_width_sharded) {
-                mm_kernel_in1_sender_writer_defines["IN1_DRAM_WIDTH_SHARDED"] = "1";
-            } else {
-                mm_kernel_in1_sender_writer_defines["IN1_DRAM_HEIGHT_SHARDED"] = "1";
-            }
-        } else {
-            mm_kernel_in1_sender_writer_defines["IN1_SHARDED"] = "1";
-        }
+    // DRAM WIDTH/ND shards use the accessor reader, independent of worker-column boundaries.
+    if (in1_is_height_sharded and in1_is_dram) {
+        mm_kernel_in1_sender_writer_defines["IN1_DRAM_HEIGHT_SHARDED"] = "1";
+    } else if (in1_is_sharded and not in1_is_dram) {
+        mm_kernel_in1_sender_writer_defines["IN1_SHARDED"] = "1";
     }
 
     if (output_is_sharded) {
@@ -3014,13 +2856,6 @@ create_program_mcast_in0_in1(
         }
     }
 
-    // dram sharded weights stride params
-    uint32_t worker_core_stride = 0;   // stride in the worker core
-    uint32_t storage_core_stride = 0;  // stride in the dram bank
-    uint32_t curr_worker_core = 0;     // current worker core
-    uint32_t curr_storage_core = 0;    // current read dram bank
-    uint32_t vc = 0;
-
     uint32_t in0_end_idx = num_blocks_y - 1;
     uint32_t in1_end_idx = num_blocks_x - 1;
     const auto& in0_sender_interleaved_cores = grid_to_cores(
@@ -3223,73 +3058,6 @@ create_program_mcast_in0_in1(
                         fused_op_signaler->push_matmul_fused_op_rt_args(mm_in1_sender_writer_args, in0_idx, in1_idx);
                     } else {
                         TT_FATAL(false, "Fused operation must be either all_gather or reduce_scatter.");
-                    }
-                }
-                if (in1_is_sharded and in1_is_dram) {  // in1 is dram sharded
-                    if (in1_is_width_sharded) {
-                        uint32_t num_iter_index = mm_in1_sender_writer_args.size() + 1;
-                        vc = vc == 3 ? 0 : vc + 1;
-                        mm_in1_sender_writer_args.push_back(vc);
-
-                        uint32_t num_iter = 0;  // iterate how many banks, till fill the current worker block
-
-                        if (curr_storage_core < num_dram_banks) {
-                            num_iter++;
-
-                            worker_core_stride = per_core_N_storage - storage_core_stride;
-
-                            mm_in1_sender_writer_args.push_back(
-                                storage_core_stride * in1_single_tile_size);  // dram_tensor_start_offset
-                            mm_in1_sender_writer_args.push_back(
-                                worker_core_stride * in1_single_tile_size);          // per_core_N_dram_bytes
-                            mm_in1_sender_writer_args.push_back(curr_storage_core);  // current_dram_bank_id
-
-                            log_debug(
-                                tt::LogOp,
-                                "curr worker core: {} read {} tiles from dram bank: {}, start from index: {}",
-                                curr_worker_core,
-                                worker_core_stride,
-                                curr_storage_core,
-                                storage_core_stride);
-
-                            curr_storage_core += (storage_core_stride + worker_core_stride) / per_core_N_storage;
-                            storage_core_stride = (storage_core_stride + worker_core_stride) % per_core_N_storage;
-
-                            uint32_t curr_worker_core_old = curr_worker_core;
-                            if (worker_core_stride >= per_core_N) {
-                                curr_worker_core += 1;
-                            }
-
-                            while (curr_worker_core <= curr_worker_core_old and curr_storage_core < num_dram_banks) {
-                                num_iter++;
-
-                                uint32_t stride = worker_core_stride + per_core_N_storage;
-                                stride = std::min(stride, per_core_N);
-
-                                mm_in1_sender_writer_args.push_back(
-                                    (stride - worker_core_stride) * in1_single_tile_size);  // per_core_N_dram_bytes
-                                mm_in1_sender_writer_args.push_back(curr_storage_core);     // current_dram_bank_id
-
-                                log_debug(
-                                    tt::LogOp,
-                                    "curr worker core: {} read {} tiles from dram bank: {}, start from index: {}",
-                                    curr_worker_core,
-                                    (stride - worker_core_stride),
-                                    curr_storage_core,
-                                    storage_core_stride);
-
-                                if (stride >= per_core_N) {
-                                    curr_worker_core += 1;
-                                }
-                                storage_core_stride = (stride - worker_core_stride) % per_core_N_storage;
-                                curr_storage_core += (stride - worker_core_stride) / per_core_N_storage;
-                                worker_core_stride = stride;
-                            }
-                        }
-                        mm_in1_sender_writer_args.insert(mm_in1_sender_writer_args.begin() + num_iter_index, num_iter);
-                    } else {
-                        // Height sharded: no additional runtime args needed
-                        // (bank/offset computed from compile-time args + batch index)
                     }
                 }
                 tt_metal::SetRuntimeArgs(

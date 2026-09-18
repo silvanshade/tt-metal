@@ -169,19 +169,7 @@ void kernel_main() {
     constexpr auto after_bias_offset = decltype(out_args)::next_compile_time_args_offset();
 #endif  // FUSE_BIAS
 
-// RT and COMPILE TIME ARGS for DRAM sharded weights
-#ifdef IN1_DRAM_WIDTH_SHARDED
-    const uint32_t vc = get_arg_val<uint32_t>(rt_args_idx++);
-    const uint32_t num_dram_shards_to_read = get_arg_val<uint32_t>(rt_args_idx++);
-    const uint32_t dram_tensor_start_offset = get_arg_val<uint32_t>(rt_args_idx++);
-    tt_l1_ptr uint32_t* in1_block_w_dram_stride_bytes =
-        reinterpret_cast<tt_l1_ptr uint32_t*>(get_arg_addr(static_cast<int>(rt_args_idx++)));
-    tt_l1_ptr uint32_t* current_dram_bank_id =
-        reinterpret_cast<tt_l1_ptr uint32_t*>(get_arg_addr(static_cast<int>(rt_args_idx++)));
-
-    constexpr uint32_t in1_dram_block_num_tiles = get_compile_time_arg_val(after_bias_offset);
-    constexpr uint32_t in1_block_w_dram_bytes = get_compile_time_arg_val(after_bias_offset + 1);
-#endif  // IN1_DRAM_WIDTH_SHARDED
+    // RT and COMPILE TIME ARGS for DRAM sharded weights
 
 #ifdef IN1_DRAM_HEIGHT_SHARDED
     constexpr uint32_t in1_KtNt_per_batch = get_compile_time_arg_val(after_bias_offset);        // K*N tiles per batch
@@ -203,8 +191,7 @@ void kernel_main() {
     // keep their natural (unpadded) stride.
     constexpr uint32_t in1_aligned_tile_size_bytes =
         (in1_single_tile_size_bytes + (DRAM_ALIGNMENT - 1)) & ~(DRAM_ALIGNMENT - 1);
-#if !defined(IN1_SHARDED) && !defined(IN1_DRAM_WIDTH_SHARDED) && !defined(IN1_DRAM_HEIGHT_SHARDED) && \
-    !defined(ENABLE_GLOBAL_CB)
+#if !defined(IN1_SHARDED) && !defined(IN1_DRAM_HEIGHT_SHARDED) && !defined(ENABLE_GLOBAL_CB)
     constexpr uint32_t in1_block_size_bytes = in1_block_num_tiles * in1_aligned_tile_size_bytes;
 #else
     constexpr uint32_t in1_block_size_bytes = in1_block_num_tiles * in1_single_tile_size_bytes;
@@ -273,11 +260,6 @@ void kernel_main() {
         noc.async_read_barrier();
     }
 
-#ifdef IN1_DRAM_WIDTH_SHARDED
-    constexpr uint32_t in1_dram_block_size_bytes = in1_dram_block_num_tiles * in1_single_tile_size_bytes;
-    uint32_t in1_block_w_bytes = in1_block_w * in1_single_tile_size_bytes;
-#endif  // IN1_DRAM_WIDTH_SHARDED
-
 #ifdef IN1_DRAM_HEIGHT_SHARDED
     constexpr uint32_t in1_batch_stride_bytes = in1_KtNt_per_batch * in1_single_tile_size_bytes;
 #endif  // IN1_DRAM_HEIGHT_SHARDED
@@ -333,12 +315,6 @@ void kernel_main() {
 #endif  // FUSE_BIAS
                 for (uint32_t bw = 0; bw < num_blocks_w_dim; ++bw) {
                     uint32_t in1_tensor_current_inner_dim_block_start_tile_id = in1_tensor_current_w_dim_block_tile_id;
-#ifdef IN1_DRAM_WIDTH_SHARDED
-                    // Reset DRAM read offset for each bh block — the inner dim loop
-                    // advances through K, and each output row block re-reads the same
-                    // in1 columns from K=0. (bw is always 1 for DRAM-sharded senders.)
-                    uint32_t l1_read_addr_in1_offset = 0;
-#endif  // IN1_DRAM_WIDTH_SHARDED
 
                     for (uint32_t block = 0; block < num_blocks_inner_dim; ++block) {
                         if constexpr (fuse_op_all_gather) {
@@ -352,58 +328,6 @@ void kernel_main() {
                         // its remote-CB credit to the prefetcher.
                         dfb_in1.reserve_back(in1_block_num_tiles);
                         experimental::remote_cb_wait_front(remote_cb_id, block == 0 ? 1u : 2u);
-#elif defined(IN1_DRAM_WIDTH_SHARDED)
-                        // Operand 1 - DRAM width sharded
-                        dfb_in1.reserve_back(in1_block_num_tiles);
-
-                        uint64_t in1_start_address =
-                            dfb_in1.get_write_ptr();  // copy start address of block, to be used for mcasting
-
-                        uint32_t l1_write_addr_in1_offset = 0;
-                        uint32_t next_bank_id_and_dram_stride_index = 0;
-
-                        AllocatorBank<AllocatorBankType::DRAM> dram_bank;
-                        for (uint32_t i = 0; i < num_dram_shards_to_read; ++i) {
-                            uint32_t shard_bank_id = current_dram_bank_id[next_bank_id_and_dram_stride_index];
-                            uint32_t shard_base_addr = in1_tensor_addr;
-                            if (i == 0) {
-                                shard_base_addr += dram_tensor_start_offset;
-                            }
-                            noc.set_async_read_state<NocOptions::CUSTOM_VC, NOC_MAX_BURST_SIZE>(
-                                dram_bank,
-                                in1_single_tile_size_bytes,
-                                {.bank_id = shard_bank_id, .addr = shard_base_addr},
-                                NocOptVals{.vc = vc});
-
-                            uint32_t l1_read_addr_in1 = l1_read_addr_in1_offset;
-                            uint32_t l1_write_addr_in1 = dfb_in1.get_write_ptr() + l1_write_addr_in1_offset;
-                            uint32_t in1_block_w_dram =
-                                in1_block_w_dram_stride_bytes[next_bank_id_and_dram_stride_index] /
-                                in1_single_tile_size_bytes;
-
-                            for (uint32_t m = 0; m < in1_block_h; ++m) {
-                                uint32_t l1_read_addr_in1_temp = l1_read_addr_in1;
-                                uint32_t l1_write_addr_in1_temp = l1_write_addr_in1;
-                                for (uint32_t w = 0; w < in1_block_w_dram; ++w) {
-                                    noc.async_read_with_state<NocOptions::CUSTOM_VC, NOC_MAX_BURST_SIZE>(
-                                        dram_bank,
-                                        CoreLocalMem<uint32_t>(l1_write_addr_in1_temp),
-                                        in1_single_tile_size_bytes,
-                                        {.bank_id = shard_bank_id, .addr = shard_base_addr + l1_read_addr_in1_temp},
-                                        {},
-                                        NocOptVals{.vc = vc});
-                                    l1_read_addr_in1_temp += in1_single_tile_size_bytes;
-                                    l1_write_addr_in1_temp += in1_single_tile_size_bytes;
-                                }
-                                l1_read_addr_in1 += in1_block_w_dram_bytes;
-                                l1_write_addr_in1 += in1_block_w_bytes;
-                            }
-                            l1_write_addr_in1_offset +=
-                                in1_block_w_dram_stride_bytes[next_bank_id_and_dram_stride_index];
-                            next_bank_id_and_dram_stride_index += 2;
-                        }
-                        l1_read_addr_in1_offset += in1_dram_block_size_bytes;
-                        noc.async_read_barrier();
 #elif defined(IN1_DRAM_HEIGHT_SHARDED)
                         // Operand 1 - DRAM height sharded (batched)
                         // Each DRAM bank holds batches_per_bank complete [K, N] matrices
@@ -440,7 +364,7 @@ void kernel_main() {
                         // Barrier! make sure the reads are done
                         noc.async_read_barrier();
 #elif !defined(IN1_SHARDED)
-                        // Operand 1 - interleaved
+                        // Operand 1 - accessor-addressed, including DRAM WIDTH/ND shards.
                         dfb_in1.reserve_back(in1_block_num_tiles);
                         uint32_t in1_write_offset = 0;
                         const uint64_t in1_start_address =
@@ -468,7 +392,7 @@ void kernel_main() {
 
                         // Barrier! make sure the reads are done
                         noc.async_read_barrier();
-#endif  // IN1_DRAM_WIDTH_SHARDED / IN1_DRAM_HEIGHT_SHARDED / IN1_SHARDED
+#endif  // IN1_DRAM_HEIGHT_SHARDED / IN1_SHARDED
 
 #ifndef SKIP_MCAST
                         // wait until all in1 mcast destinations have atomically incremented the in1 semaphore_addr
@@ -546,53 +470,6 @@ void kernel_main() {
                             dfb_in3.get_write_ptr();        // copy start address of block, to be used for mcasting
                         uint32_t in3_block_size_bytes = 0;  // can be optimized later, pass it to kernel
 
-#ifdef IN1_DRAM_WIDTH_SHARDED
-                        uint32_t l1_write_addr_in3_offset = 0;
-                        uint32_t next_bank_id_and_dram_stride_index = 0;
-
-                        AllocatorBank<AllocatorBankType::DRAM> bias_dram_bank;
-                        for (uint32_t i = 0; i < num_dram_shards_to_read; ++i) {
-                            uint32_t bias_shard_bank_id = current_dram_bank_id[next_bank_id_and_dram_stride_index];
-                            uint32_t bias_shard_base_addr = in3_tensor_addr;
-                            if (i == 0) {
-                                // dram_tensor_start_offset is in in1 tile bytes; convert to
-                                // bias tile bytes since bias_dtype may differ from in1_dtype.
-                                bias_shard_base_addr += (dram_tensor_start_offset / in1_single_tile_size_bytes) *
-                                                        bias_single_tile_size_bytes;
-                            }
-
-                            noc.set_async_read_state<NocOptions::CUSTOM_VC, NOC_MAX_BURST_SIZE>(
-                                bias_dram_bank,
-                                bias_single_tile_size_bytes,
-                                {.bank_id = bias_shard_bank_id, .addr = bias_shard_base_addr},
-                                NocOptVals{.vc = vc});
-
-                            uint32_t l1_read_addr_in3 = 0;
-                            l1_write_addr_in3 = dfb_in3.get_write_ptr() + l1_write_addr_in3_offset;
-                            // in1_block_w_dram_stride_bytes is in in1 tile bytes, so divide
-                            // by in1_single_tile_size_bytes (not bias) to get the tile count.
-                            uint32_t in3_block_w_dram =
-                                in1_block_w_dram_stride_bytes[next_bank_id_and_dram_stride_index] /
-                                in1_single_tile_size_bytes;
-
-                            for (uint32_t w = 0; w < in3_block_w_dram; ++w) {
-                                noc.async_read_with_state<NocOptions::CUSTOM_VC, NOC_MAX_BURST_SIZE>(
-                                    bias_dram_bank,
-                                    CoreLocalMem<uint32_t>(l1_write_addr_in3),
-                                    bias_single_tile_size_bytes,
-                                    {.bank_id = bias_shard_bank_id, .addr = bias_shard_base_addr + l1_read_addr_in3},
-                                    {},
-                                    NocOptVals{.vc = vc});
-                                l1_read_addr_in3 += bias_single_tile_size_bytes;
-                                l1_write_addr_in3 += bias_single_tile_size_bytes;
-                                in3_block_size_bytes += bias_single_tile_size_bytes;
-                            }
-                            // Advance L1 offset in bias tile bytes, not in1 stride bytes.
-                            l1_write_addr_in3_offset += in3_block_w_dram * bias_single_tile_size_bytes;
-                            next_bank_id_and_dram_stride_index += 2;
-                        }
-                        noc.async_read_barrier();
-#else
                         // Copy in1 block into CB, as the default kernel
                         uint32_t in3_tensor_tile_id = in3_tensor_current_w_dim_block_tile_id;
                         for (uint32_t w = 0; w < in1_block_w; ++w) {
@@ -610,7 +487,6 @@ void kernel_main() {
                         }
                         // Barrier! make sure the reads are done
                         noc.async_read_barrier();
-#endif  // IN1_DRAM_WIDTH_SHARDED
 
 #ifndef SKIP_MCAST
 
@@ -757,8 +633,9 @@ void kernel_main() {
     }
 
 #ifdef OUT_SHARDED
-    dfb_out.wait_front(static_cast<uint16_t>(
-        batch * out_num_nonzero_subblocks_h * out_num_nonzero_subblocks_w * out_subblock_w * out_subblock_h));
+    dfb_out.wait_front(
+        static_cast<uint16_t>(
+            batch * out_num_nonzero_subblocks_h * out_num_nonzero_subblocks_w * out_subblock_w * out_subblock_h));
 #endif
 #ifdef ENABLE_GLOBAL_CB
     experimental::update_remote_cb_config_in_l1(remote_cb_id);
