@@ -1142,10 +1142,12 @@ class TPGatedDeltaNet:
         qkv, z, a, b = projected
         count, width = qkv.shape[-2], qkv.shape[-1]
         memory = ttnn.L1_MEMORY_CONFIG
-        history = ttnn.concat([*self.conv_states[1:], qkv], dim=1, memory_config=memory)
+        # Sequence rows occupy separate tiles, so history windows never split a tile.
+        qkv = ttnn.reshape(qkv, (count, 1, width))
+        history = ttnn.concat([*self.conv_states[1:], qkv], dim=0, memory_config=memory)
         conv = None
         for tap in range(self.K):
-            window = ttnn.slice(history, (0, tap, 0), (1, tap + count, width))
+            window = ttnn.slice(history, (tap, 0, 0), (tap + count, 1, width))
             previous = conv
             conv = (
                 ttnn.multiply(window, self.tw["conv_taps"][tap], memory_config=memory)
@@ -1156,21 +1158,21 @@ class TPGatedDeltaNet:
             if previous is not None:
                 ttnn.deallocate(previous)
         for index in range(count):
-            row = ttnn.slice(qkv, (0, index, 0), (1, index + 1, width))
+            row = ttnn.slice(qkv, (index, 0, 0), (index + 1, 1, width))
             ttnn.copy(row, conv_inputs[index])
             ttnn.deallocate(row)
         for index, destination in enumerate(self.conv_states):
             start = count - 1 + index
-            row = ttnn.slice(history, (0, start, 0), (1, start + 1, width))
+            row = ttnn.slice(history, (start, 0, 0), (start + 1, 1, width))
             ttnn.copy(row, destination)
             ttnn.deallocate(row)
         ttnn.deallocate(history)
         activated = ttnn.silu(conv, memory_config=memory)
         ttnn.deallocate(conv)
         kd, nk, nv = self.key_dim_tp, self.Nk, self.Nv
-        q = ttnn.reshape(ttnn.slice(activated, (0, 0, 0), (1, count, kd)), (count, nk, self.Dk))
-        k = ttnn.reshape(ttnn.slice(activated, (0, 0, kd), (1, count, 2 * kd)), (count, nk, self.Dk))
-        v = ttnn.reshape(ttnn.slice(activated, (0, 0, 2 * kd), (1, count, width)), (count, 1, nv, self.Dv))
+        q = ttnn.reshape(ttnn.slice(activated, (0, 0, 0), (count, 1, kd)), (count, nk, self.Dk))
+        k = ttnn.reshape(ttnn.slice(activated, (0, 0, kd), (count, 1, 2 * kd)), (count, nk, self.Dk))
+        v = ttnn.reshape(ttnn.slice(activated, (0, 0, 2 * kd), (count, 1, width)), (count, 1, nv, self.Dv))
         ttnn.deallocate(activated)
         q = ttnn.reshape(ttnn.repeat_interleave(q, nv // nk, dim=1), (count, 1, nv, self.Dk))
         k = ttnn.reshape(ttnn.repeat_interleave(k, nv // nk, dim=1), (count, 1, nv, self.Dk))
@@ -1187,14 +1189,14 @@ class TPGatedDeltaNet:
             ttnn.reshape(k, (count, nv, self.Dk)),
             ttnn.reshape(delta, (count, nv, self.Dv)),
             ttnn.reshape(g, (count, nv, 1, 1)),
-            ttnn.reshape(beta, (count, nv)),
+            beta,
         )
         for index in range(count):
             for source, destination in zip(tapes, updates[index], strict=True):
                 start, end = [0] * len(source.shape), list(source.shape)
                 start[0], end[0] = index, index + 1
                 row = ttnn.slice(source, start, end)
-                ttnn.copy(row, destination)
+                ttnn.copy(ttnn.reshape(row, destination.shape), destination)
                 ttnn.deallocate(row)
         for tensor in (q, k, v, g, beta, delta):
             ttnn.deallocate(tensor)
