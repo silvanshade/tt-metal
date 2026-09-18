@@ -132,19 +132,22 @@ class GDNVerification:
             scalar in [0, count]; committed state has not advanced since verification.
         ensures: only accepted inputs change state; rejected writes never contribute.
             Device acceptance stays on device, including convolution-prefix selection.
-        intension: retain one recurrent accumulator, not a state snapshot per token.
+        intension: retain one recurrent accumulator, not a state snapshot per token;
+            a host-known full prefix reuses verified scratch without recurrence replay.
         """
         dynamic = isinstance(accepted, ttnn.Tensor)
         assert self.count > 0
         if not dynamic:
             assert 0 <= accepted <= self.count
         count = self.count if dynamic else accepted
+        full = not dynamic and accepted == self.count
         self.count = 0
         if count == 0:
             return
         layer = self.layer
-        h = ttnn.clone(self.checkpoint, memory_config=ttnn.L1_MEMORY_CONFIG)
-        for index, (k, delta, g, beta) in enumerate(self.updates[:count]):
+        h = ttnn.clone(self.scratch if full else self.checkpoint, memory_config=ttnn.L1_MEMORY_CONFIG)
+        updates = () if full else self.updates[:count]
+        for index, (k, delta, g, beta) in enumerate(updates):
             previous = h
             operand = h if h.dtype == k.dtype else ttnn.typecast(h, k.dtype)
             decayed = ttnn.multiply(
