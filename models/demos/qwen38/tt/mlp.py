@@ -51,7 +51,7 @@ def _build_gate_up(gate_w, up_w, mesh, tp, cache_path):
 def load_mlp_weights(mesh_device, state_dict, tensor_cache_path=None, args=None, use_gateup_agmm=True) -> MLPWeights:
     """Per-layer MLP state: gate_proj, down_proj, up_proj weights."""
     tp = getattr(args, "num_devices", 1) if args is not None else 1
-    # DRAM-WIDTH_SHARDED decode weights (QWEN36_DECODE_MATMUL=dram_sharded). Cache uses `.dramshard`
+    # DRAM-WIDTH_SHARDED decode weights (QWEN38_DECODE_MATMUL=dram_sharded). Cache uses `.dramshard`
     # — layout incompatible with the interleaved cache (as_tensor ignores the requested memcfg on
     # reload) — so both arms' caches coexist. The 1D arm needs interleaved weights (its mcast decode
     # matmul reads in0/in1 interleaved).
@@ -167,7 +167,7 @@ class Qwen38MLP:
         self.args = args
         self.tt_ccl = tt_ccl
         self.num_devices = getattr(args, "num_devices", 1) if args is not None else 1
-        # Decode layout (QWEN36_DECODE_MATMUL): exactly one of these is true on the decode path.
+        # Decode layout (QWEN38_DECODE_MATMUL): exactly one of these is true on the decode path.
         self._mlp_1d_decode = args is not None and getattr(args, "mlp_1d_decode", False)
         # Match load_mlp_weights dram_sharded condition for layout consistency.
         self._dram_sharded = (
