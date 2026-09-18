@@ -530,8 +530,8 @@ class TPAttention:
         requires: bound paged cache; 1..32 consecutive positions; page-table rows
             name the same sequence; caller owns logical committed length.
         ensures: projections run across token rows together; KV writes serialize
-            to prevent quantized-tile races. Attention retains target decode
-            reduction order for each query.
+            to prevent quantized-tile races. Batched attention applies each row's
+            causal position in one SDPA.
             Rejection trims logical length: next query position masks stale suffix,
             and subsequent token writes replace it before attention can read it.
         hypothesis: L2 sequential decode agreement across a cache-block boundary;
@@ -660,36 +660,16 @@ class TPAttention:
             ttnn.deallocate(k)
             ttnn.deallocate(v)
 
-            def attend(query, positions, pages):
-                return ttnn.transformer.paged_scaled_dot_product_attention_decode(
-                    query,
-                    keys,
-                    values,
-                    page_table_tensor=pages,
-                    cur_pos_tensor=positions,
-                    scale=self.scale,
-                    program_config=sdpa_dec_cfg,
-                    memory_config=_L1,
-                )
-
-            if shared_sequence and B > 1:
-                # Preserve the single-query reduction tree used by target decode.
-                # Treating speculative time rows as users changes the core partition
-                # and rounding, which can change greedy decisions near a logit tie.
-                rows = []
-                for index in range(B):
-                    query = ttnn.slice(q, (0, index, 0, 0), (1, index + 1, q.shape[2], HD))
-                    position = ttnn.slice(cur_pos_tt, (index,), (index + 1,))
-                    pages = ttnn.slice(page_table, (index, 0), (index + 1, page_table.shape[-1]))
-                    rows.append(attend(query, position, pages))
-                    ttnn.deallocate(query)
-                    ttnn.deallocate(position)
-                    ttnn.deallocate(pages)
-                attn_out = ttnn.concat(rows, dim=1, memory_config=_L1)
-                for row in rows:
-                    ttnn.deallocate(row)
-            else:
-                attn_out = attend(q, cur_pos_tt, page_table)
+            attn_out = ttnn.transformer.paged_scaled_dot_product_attention_decode(
+                q,
+                keys,
+                values,
+                page_table_tensor=page_table,
+                cur_pos_tensor=cur_pos_tt,
+                scale=self.scale,
+                program_config=sdpa_dec_cfg,
+                memory_config=_L1,
+            )
             ttnn.deallocate(q)
         else:
             # Internal per-head KV caches; pad NKV head dim to 32 for tile-aligned update

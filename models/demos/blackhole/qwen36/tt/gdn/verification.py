@@ -3,8 +3,6 @@
 
 """Single-user GDN verification with compact finite-precision state replay."""
 
-import os
-
 import torch
 
 import ttnn
@@ -32,14 +30,13 @@ class GDNVerification:
         self.count = 0
         rec_shape = (1, layer.Nv, layer.Dk, layer.Dv)
         conv_shape = (1, 1, layer.qkv_dim_tp)
-        self.checkpoint = self._allocate(rec_shape, layer.rec_state.dtype)
-        self.scratch = self._allocate(rec_shape, layer.rec_state.dtype)
+        self.checkpoint = self._allocate(rec_shape, ttnn.float32)
+        self.scratch = self._allocate(rec_shape, ttnn.float32)
         self.checkpoint_convs = [self._allocate(conv_shape, ttnn.bfloat16) for _ in range(layer.K)]
         self.scratch_convs = [self._allocate(conv_shape, ttnn.bfloat16) for _ in range(layer.K)]
         self.conv_inputs = [self._allocate(conv_shape, ttnn.bfloat16) for _ in range(max_tokens)]
-        update_dtype = ttnn.bfloat16 if os.environ.get("QWEN35_GDN_DECODE_BF16") == "1" else ttnn.float32
         shapes = ((1, layer.Nv, layer.Dk), (1, layer.Nv, layer.Dv), (1, layer.Nv, 1, 1), (1, layer.Nv))
-        self.updates = [tuple(self._allocate(shape, update_dtype) for shape in shapes) for _ in range(max_tokens)]
+        self.updates = [tuple(self._allocate(shape, ttnn.float32) for shape in shapes) for _ in range(max_tokens)]
         self._released = False
 
     def release(self) -> None:
@@ -72,11 +69,12 @@ class GDNVerification:
 
     def _checkpoint_row(self, source: ttnn.Tensor, target: ttnn.Tensor, dim: int, slot: int) -> None:
         """Copy one committed slot without consuming source or persistent target."""
-        if source.shape[dim] == 1:
-            ttnn.copy(source, target)
-        else:
-            row = self.layer._slice_along(source, dim, slot, slot + 1)
-            ttnn.copy(row, target)
+        row = source if source.shape[dim] == 1 else self.layer._slice_along(source, dim, slot, slot + 1)
+        operand = row if row.dtype == target.dtype else ttnn.typecast(row, target.dtype)
+        ttnn.copy(operand, target)
+        if operand is not row:
+            ttnn.deallocate(operand)
+        if row is not source:
             ttnn.deallocate(row)
 
     def verify(self, x: ttnn.Tensor, slot: int) -> ttnn.Tensor:
@@ -126,7 +124,7 @@ class GDNVerification:
         return output
 
     def fold(self, accepted: int | ttnn.Tensor) -> None:
-        """Commit accepted verifier inputs with identical finite-precision replay.
+        """Commit accepted verifier inputs from the FP32 update tape.
 
         requires: pending verification; accepted is an integer or device FP32 tiled
             scalar in [0, count]; committed state has not advanced since verification.
