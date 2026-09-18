@@ -3,9 +3,10 @@
 """Blackhole H128 packing, normalization, padding and trace witnesses.
 
 The host oracle is an independent float64 Sylvester matrix. Boundary vectors
-mirror the LLK sign/exponent/full-mantissa cases; tiled padding and H256 exercise
-the model adapter. These observations target row/face addressing, sign/order,
-normalization, stale replay output and subsequent SFPU initialization faults.
+mirror the LLK sign/exponent/full-mantissa cases; tiled padding, H128 caller
+dtypes and H256 exercise the model adapter. These observations target row/face
+addressing, sign/order, normalization, stale replay output, input consumption
+and subsequent SFPU initialization faults.
 """
 
 import pytest
@@ -104,6 +105,33 @@ def test_h128_trace_replay_and_following_sfpu(ttnn_mesh_device):
         ttnn.release_trace(device, trace)
         for tensor in (source, poison, result, following):
             ttnn.deallocate(tensor)
+
+
+def test_h128_rotation_preserves_input_dtype(ttnn_mesh_device: ttnn.MeshDevice) -> None:
+    values = torch.randn((1, 3, 65, 128), generator=torch.Generator().manual_seed(128)).bfloat16()
+    rotation = HadamardRotation(ttnn_mesh_device, 128)
+    for dtype in (ttnn.bfloat16, ttnn.bfloat8_b):
+        source = ttnn.from_torch(
+            values,
+            device=ttnn_mesh_device,
+            dtype=dtype,
+            layout=ttnn.TILE_LAYOUT,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
+        expected = _reference(ttnn.to_torch(source))
+        result = rotation(source)
+        try:
+            assert not source.is_allocated()
+            assert result.dtype == dtype
+            assert tuple(result.shape) == tuple(values.shape)
+            assert result.memory_config() == ttnn.L1_MEMORY_CONFIG
+            actual = ttnn.to_torch(result).double()
+            pcc = torch.corrcoef(torch.stack((actual.flatten(), expected.flatten())))[0, 1]
+            assert pcc > 0.9999
+            bound = expected.square().mean(-1, keepdim=True).sqrt() * 0.06
+            assert torch.all((actual - expected).abs() <= bound)
+        finally:
+            ttnn.deallocate(result)
 
 
 @pytest.mark.parametrize("shape", [(1, 1, 32, 256), (1, 1, 4, 256), (1, 3, 65, 256)])

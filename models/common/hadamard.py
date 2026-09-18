@@ -113,8 +113,9 @@ class HadamardRotation:
     - panics: none.
 
     # Adequacy
-    H256 head/padding witnesses compare against independent float64 arithmetic;
-    model prefill and decode exercise temporary lifetimes and cache writes.
+    H128 BF16/BFP8 and H256 head/padding witnesses compare against independent
+    float64 arithmetic; model prefill and decode exercise temporary lifetimes
+    and cache writes.
     """
 
     def __init__(self, mesh_device, head_dim):
@@ -153,8 +154,10 @@ class HadamardRotation:
         source = tensor if dtype == ttnn.bfloat16 else ttnn.typecast(tensor, ttnn.bfloat16)
         if self.head_dim == 128:
             rotated = hadamard_h128(source)
-            result = ttnn.typecast(rotated, dtype)
-            if dtype != rotated.dtype:
+            if dtype == rotated.dtype:
+                result = rotated
+            else:
+                result = ttnn.typecast(rotated, dtype)
                 ttnn.deallocate(rotated)
         else:
             start = [0] * len(source.shape)
