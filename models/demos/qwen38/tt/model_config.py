@@ -16,7 +16,7 @@ from models.tt_transformers.tt.model_config import ModelArgs
 # l1_small_size the GDN prefill depthwise ttnn.conv1d requires.
 GDN_CONV1D_L1_SMALL_SIZE = 24576
 
-# Decode projection layout when QWEN36_DECODE_MATMUL is unset; see _init_tp_config. Measured on
+# Decode projection layout when QWEN38_DECODE_MATMUL is unset; see _init_tp_config. Measured on
 # p150a at 23K, no-RT, steps 3-102: dram_sharded runs the ordinary step 5.5 ms and the MTP round
 # 7.2 ms faster (median) than 1d, for +72 ms on the 23K prefill, 32/32 greedy-exact.
 DEFAULT_DECODE_MATMUL = "dram_sharded"
@@ -179,14 +179,14 @@ class Qwen38ModelArgs(ModelArgs):
         # sharded kernel. Per-matmul on p150a the sharded arm runs 1.41-1.51x the 1D arm at the
         # widest legal in0_block_w with 2 workers/bank (tests/test_decode_matmul_layout_sweep.py);
         # the arms differ in reshards too, so the default follows the full-step measurement.
-        _layout = os.environ.get("QWEN36_DECODE_MATMUL", DEFAULT_DECODE_MATMUL).strip().lower()
+        _layout = os.environ.get("QWEN38_DECODE_MATMUL", DEFAULT_DECODE_MATMUL).strip().lower()
         if _layout not in ("1d", "dram_sharded"):
-            raise ValueError(f"QWEN36_DECODE_MATMUL must be '1d' or 'dram_sharded', got {_layout!r}")
+            raise ValueError(f"QWEN38_DECODE_MATMUL must be '1d' or 'dram_sharded', got {_layout!r}")
         self.decode_matmul_layout = _layout
         _dram_sharded = _layout == "dram_sharded"
         # Readers per DRAM bank in the sharded kernel; the builder drops to 1 where the per-bank
         # output width in tiles is odd (gdn_qkvzab).
-        self.dram_sharded_workers = max(1, int(os.environ.get("QWEN36_DRAM_SHARDED_WORKERS", "2")))
+        self.dram_sharded_workers = max(1, int(os.environ.get("QWEN38_DRAM_SHARDED_WORKERS", "2")))
         _w = self.dram_sharded_workers
 
         # DRAM-sharded weights: column-parallel [hidden, out_tp]
@@ -249,7 +249,7 @@ class Qwen38ModelArgs(ModelArgs):
             M, self.hidden_dim // tp, self.dim, num_workers_per_dram_bank=_w
         )
 
-        # 1D decode matmuls (QWEN36_DECODE_MATMUL=1d): small grids on interleaved weights.
+        # 1D decode matmuls (QWEN38_DECODE_MATMUL=1d): small grids on interleaved weights.
         # decode_grid_w = the device worker-grid width (11 on BH P150, 8 on WH). Shaping the 1D-mcast
         # grid WIDE-first (up to this many cols) beats the old cols<=8 shaping by ~2% on this matmul —
         # a wide-short grid shortens the in0 multicast column (test_mlp_matmul_sweep wide1d_* vs
