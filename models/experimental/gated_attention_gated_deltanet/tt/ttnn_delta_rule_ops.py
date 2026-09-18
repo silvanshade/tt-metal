@@ -399,14 +399,10 @@ def recurrent_gated_delta_rule_decode_ttnn(
     initial_state=None,
     device=None,
     high_precision=False,
-    state_update: tuple[ttnn.Tensor, ...] | None = None,
 ):
-    """Decode one token; optionally retain operands for accepted-prefix state replay.
+    """Decode one token; return output and updated recurrent state.
 
-    requires: state_update is None or four allocated tensors matching normalized
-        k [B,H,K], delta [B,H,V], log-decay [B,H,1,1], beta [B,H], including dtype.
-    ensures: output and state retain decode semantics; supplied buffers receive
-        exact state-write operands, without another normalization or state read.
+    ensures: output and state retain decode semantics.
     """
     B = q.shape[0]
     H = q.shape[2]
@@ -482,9 +478,6 @@ def recurrent_gated_delta_rule_decode_ttnn(
     # Delta + state write (no re-decay).
     delta = ttnn.subtract(v_t, v_read, memory_config=_L1)
     k_t = ttnn.reshape(k_row, [B, H, K], memory_config=_L1)
-    if state_update is not None:
-        for src, dst in zip((k_t, delta, g_bhkv, beta_t), state_update, strict=True):
-            ttnn.copy(src, dst)
     # decay_t is unused downstream (apply_decay=False -> h already decayed above); pass g_bhkv to
     # satisfy the signature without recomputing a decay tensor.
     h = fused_decay_and_write_ttnn(
