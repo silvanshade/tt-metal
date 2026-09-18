@@ -132,10 +132,6 @@ void kernel_main() {
     // aligned stride.
     const uint32_t bias_single_tile_size_bytes = get_local_cb_interface(dfb_id_in3).fifo_page_size;
 
-#ifndef BIAS_SHARDED
-    uint32_t l1_write_addr_in3;
-    // Bias accessor will be defined later after TensorAccessor args
-#endif  // BIAS_SHARDED
 #else
     rt_args_idx += 2;  // Skip over placeholders
 #endif  // FUSE_BIAS
@@ -184,11 +180,9 @@ void kernel_main() {
 
     constexpr uint32_t dfb_id_in1 = get_named_compile_time_arg_val("cb_in1");
     constexpr uint32_t in1_single_tile_size_bytes = get_tile_size(dfb_id_in1);
-    // Tiles whose size is not a multiple of the DRAM alignment are padded to it in DRAM, and the
-    // interleaved in1 CB pages are sized to match (see the program factory). On the plain interleaved
-    // path the NOC reads the unpadded tile of data into each padded slot and tiles are laid out /
-    // multicast at the padded stride. No-op when already aligned. The sharded / DRAM-sharded paths
-    // keep their natural (unpadded) stride.
+    // DRAM tiles and accessor-addressed CB pages share the aligned stride. Each read copies
+    // the unpadded tile into its aligned CB slot, including DRAM WIDTH/ND shards. The direct
+    // L1-sharded, DRAM-height-sharded and remote-CB paths retain their natural tile stride.
     constexpr uint32_t in1_aligned_tile_size_bytes =
         (in1_single_tile_size_bytes + (DRAM_ALIGNMENT - 1)) & ~(DRAM_ALIGNMENT - 1);
 #if !defined(IN1_SHARDED) && !defined(IN1_DRAM_HEIGHT_SHARDED) && !defined(ENABLE_GLOBAL_CB)
@@ -214,8 +208,6 @@ void kernel_main() {
     dfb_in1.reserve_back(in1_block_num_tiles * num_blocks_inner_dim);
     dfb_in1.push_back(in1_block_num_tiles * num_blocks_inner_dim);
 #elif !defined(ENABLE_GLOBAL_CB)
-    uint32_t l1_write_addr_in1;
-
     [[maybe_unused]] const auto s1 = TensorAccessor(in1_args, in1_tensor_addr);
 #endif  // IN1_SHARDED / ENABLE_GLOBAL_CB
 
@@ -334,7 +326,7 @@ void kernel_main() {
                         // Bank and offset computed at start of batch loop
                         dfb_in1.reserve_back(in1_block_num_tiles);
 
-                        l1_write_addr_in1 = dfb_in1.get_write_ptr();
+                        uint32_t l1_write_addr_in1 = dfb_in1.get_write_ptr();
                         uint64_t in1_start_address =
                             l1_write_addr_in1;  // copy start address of block, to be used for mcasting
 
