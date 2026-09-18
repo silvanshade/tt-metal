@@ -16,6 +16,11 @@ from models.tt_transformers.tt.model_config import ModelArgs
 # l1_small_size the GDN prefill depthwise ttnn.conv1d requires.
 GDN_CONV1D_L1_SMALL_SIZE = 24576
 
+# Decode projection layout when QWEN36_DECODE_MATMUL is unset; see _init_tp_config. Measured on
+# p150a at 23K, no-RT, steps 3-102: dram_sharded runs the ordinary step 5.5 ms and the MTP round
+# 7.2 ms faster (median) than 1d, for +72 ms on the 23K prefill, 32/32 greedy-exact.
+DEFAULT_DECODE_MATMUL = "dram_sharded"
+
 
 class Qwen36ModelArgs(ModelArgs):
     """ModelArgs for the Qwen3.5 / 3.6 family on Blackhole (9B / 27B / 35B-A3B; dense + MoE)."""
@@ -169,6 +174,21 @@ class Qwen36ModelArgs(ModelArgs):
         self.attn_out_dim_tp = (self.n_heads * self.head_dim) // tp
         kv_dim_per_device = self.n_local_kv_heads * self.head_dim
 
+        # Decode (M=1) projection layout. "1d": interleaved weights + tuned small-grid 1D-mcast
+        # kernels. "dram_sharded": WIDTH_SHARDED weights across the 8 DRAM banks + the multi-worker
+        # sharded kernel. Per-matmul on p150a the sharded arm runs 1.41-1.51x the 1D arm at the
+        # widest legal in0_block_w with 2 workers/bank (tests/test_decode_matmul_layout_sweep.py);
+        # the arms differ in reshards too, so the default follows the full-step measurement.
+        _layout = os.environ.get("QWEN36_DECODE_MATMUL", DEFAULT_DECODE_MATMUL).strip().lower()
+        if _layout not in ("1d", "dram_sharded"):
+            raise ValueError(f"QWEN36_DECODE_MATMUL must be '1d' or 'dram_sharded', got {_layout!r}")
+        self.decode_matmul_layout = _layout
+        _dram_sharded = _layout == "dram_sharded"
+        # Readers per DRAM bank in the sharded kernel; the builder drops to 1 where the per-bank
+        # output width in tiles is odd (gdn_qkvzab).
+        self.dram_sharded_workers = max(1, int(os.environ.get("QWEN36_DRAM_SHARDED_WORKERS", "2")))
+        _w = self.dram_sharded_workers
+
         # DRAM-sharded weights: column-parallel [hidden, out_tp]
         self.gdn_qkvz_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.gdn_qkvz_dim_tp)
         self.gdn_qkvzab_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.gdn_qkvzab_dim_tp)
@@ -182,38 +202,62 @@ class Qwen36ModelArgs(ModelArgs):
         self.attn_qkv_fused_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.attn_qkv_fused_dim_tp)
         self.mlp_w1_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.hidden_dim // tp)
         self.mlp_w3_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.hidden_dim // tp)
-        # row-parallel out-projections: DRAM-INTERLEAVED (None -> plain ttnn.linear); DRAM-sharding narrow-K here loses to the interleaved 1D kernel and adds 2 reshards/layer.
-        self.gdn_out_weight_memcfg = None
-        self.attn_wo_weight_memcfg = None
         self.mlp_w2_weight_memcfg = tpc.create_dram_sharded_mem_config(self.hidden_dim // tp, self.dim)
+        # Row-parallel out-projections: sharded only in the dram_sharded arm (None -> plain
+        # ttnn.linear on an interleaved weight, which is what the 1D arm's tuned kernel wraps).
+        # Sharding them costs 2 reshards/layer and wins 1.41x on the matmul itself (out_proj row).
+        self.gdn_out_weight_memcfg = (
+            tpc.create_dram_sharded_mem_config(self.gdn_value_dim_tp, self.dim) if _dram_sharded else None
+        )
+        self.attn_wo_weight_memcfg = (
+            tpc.create_dram_sharded_mem_config(self.attn_out_dim_tp, self.dim) if _dram_sharded else None
+        )
 
         # DRAM-sharded matmul progcfgs (decode, M=1)
         M = 1
-        self.gdn_qkvz_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, self.gdn_qkvz_dim_tp)
-        self.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, self.gdn_qkvzab_dim_tp)
-        self.gdn_out_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.gdn_value_dim_tp, self.dim)
+        self.gdn_qkvz_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.dim, self.gdn_qkvz_dim_tp, num_workers_per_dram_bank=_w
+        )
+        self.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.dim, self.gdn_qkvzab_dim_tp, num_workers_per_dram_bank=_w
+        )
+        self.gdn_out_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.gdn_value_dim_tp, self.dim, num_workers_per_dram_bank=_w
+        )
         self.attn_qg_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.n_local_heads * self.head_dim * 2
+            M, self.dim, self.n_local_heads * self.head_dim * 2, num_workers_per_dram_bank=_w
         )
-        self.attn_k_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, kv_dim_per_device)
-        self.attn_v_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, kv_dim_per_device)
+        self.attn_k_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.dim, kv_dim_per_device, num_workers_per_dram_bank=_w
+        )
+        self.attn_v_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.dim, kv_dim_per_device, num_workers_per_dram_bank=_w
+        )
         self.attn_qkv_fused_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.attn_qkv_fused_dim_tp
+            M, self.dim, self.attn_qkv_fused_dim_tp, num_workers_per_dram_bank=_w
         )
-        self.attn_wo_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.attn_out_dim_tp, self.dim)
-        self.mlp_w1_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, self.hidden_dim // tp)
-        self.mlp_w3_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.dim, self.hidden_dim // tp)
-        self.mlp_w2_progcfg = tpc.create_dram_sharded_matmul_program_config(M, self.hidden_dim // tp, self.dim)
+        self.attn_wo_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.attn_out_dim_tp, self.dim, num_workers_per_dram_bank=_w
+        )
+        self.mlp_w1_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.dim, self.hidden_dim // tp, num_workers_per_dram_bank=_w
+        )
+        self.mlp_w3_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.dim, self.hidden_dim // tp, num_workers_per_dram_bank=_w
+        )
+        self.mlp_w2_progcfg = tpc.create_dram_sharded_matmul_program_config(
+            M, self.hidden_dim // tp, self.dim, num_workers_per_dram_bank=_w
+        )
 
-        # 1D decode MLP matmuls (DEFAULT): small grids beat the ~80-core DRAM-sharded grid on the
-        # bandwidth-bound skinny (M<=1) decode matmuls. Interleaved weights.
+        # 1D decode matmuls (QWEN36_DECODE_MATMUL=1d): small grids on interleaved weights.
         # decode_grid_w = the device worker-grid width (11 on BH P150, 8 on WH). Shaping the 1D-mcast
         # grid WIDE-first (up to this many cols) beats the old cols<=8 shaping by ~2% on this matmul —
         # a wide-short grid shortens the in0 multicast column (test_mlp_matmul_sweep wide1d_* vs
         # forced1d_*). Applied to gate/up ONLY (the swept, verified projections); the others below keep
         # the legacy cols<=8 shaping (grid_w default) until their shapes are swept too.
+        # Both arms' configs are always built; the flags below pick which one each call site takes.
         self.decode_grid_w = mesh_device.compute_with_storage_grid_size().x
-        self.mlp_1d_decode = True
+        self.mlp_1d_decode = not _dram_sharded
         # gate/up: num_cores=44 -> 11x4 on BH, the fastest measured config (wide1d_11x4c, 42.8us vs
         # 43.9us for the old 8x4=forced1d_32c). On WH (decode_grid_w=8) this falls back to 8x6.
         self.mlp_w1_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
@@ -233,9 +277,9 @@ class Qwen36ModelArgs(ModelArgs):
             M, self.hidden_dim // tp, self.dim, num_cores=33, grid_w=self.decode_grid_w
         )
 
-        # Input-projection 1D decode (DEFAULT): same idea for attn QKV+gate and GDN QKVZAB in-projections.
+        # Input-projection 1D decode: same idea for attn QKV+gate and GDN QKVZAB in-projections.
         # Weights load interleaved (prefill AGMM verified bit-identical); tuned grids per test_mlp_matmul_sweep.
-        self.proj_1d_decode = True
+        self.proj_1d_decode = not _dram_sharded
         self.attn_qkv_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
             M, self.dim, self.attn_qkv_fused_dim_tp, num_cores=64
         )
@@ -274,6 +318,8 @@ class Qwen36ModelArgs(ModelArgs):
         self.act_shard_hidden = tpc.create_activation_shard_config(self.dim)
         self.act_shard_gdn_value = tpc.create_activation_shard_config(self.gdn_value_dim_tp)
         self.act_shard_attn_out = tpc.create_activation_shard_config(self.attn_out_dim_tp)
+        # Down-projection input in the dram_sharded arm; same grid as mlp_w2_progcfg (_find_grid).
+        self.act_shard_ff = tpc.create_activation_shard_config(self.hidden_dim // tp)
 
         # KV-cache height shard for paged_update_cache (one user per core).
         _B = max(1, self.max_batch_size)
