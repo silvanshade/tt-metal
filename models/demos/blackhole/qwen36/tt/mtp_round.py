@@ -94,7 +94,7 @@ class Qwen36MTPRound:
 
     def _argmax(self, logits: ttnn.Tensor) -> ttnn.Tensor:
         # Padded vocabulary entries are not legal tokens, even if their logits win.
-        valid = logits[..., : self.target.vocab_size]
+        valid = ttnn.to_layout(logits[..., : self.target.vocab_size], ttnn.ROW_MAJOR_LAYOUT)
         return ttnn.reshape(ttnn.argmax(valid, dim=-1, keepdim=True), (logits.shape[-2], 1))
 
     def _verify(self, count: int, slot: int) -> None:
