@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-"""Qwen3.6-27B end-to-end multimodal (vision + text) generation demo on Blackhole P150.
+"""Qwen3.8-27B end-to-end multimodal (vision + text) generation demo on Blackhole P150.
 
 Mirrors the text-only ``text_demo.py`` flow, but routes images through the TT vision tower
 (``DropInVisionTransformer``) and splices the resulting image embeddings into the text
@@ -25,9 +25,9 @@ decoded the way the HF reference does — transformers' ``load_video`` (pyav bac
 Multi-device (TP) is selected via MESH_DEVICE and uses the chunk-outer traced prefill +
 paged traced decode path, exactly like the text demo.
 
-Run all:    pytest models/demos/blackhole/qwen36/demo/vision_demo.py -v -s
-Run single: pytest models/demos/blackhole/qwen36/demo/vision_demo.py -v -s -k "traced_single_image"
-Run TP:     MESH_DEVICE=P150x4 pytest models/demos/blackhole/qwen36/demo/vision_demo.py -v -s -k "traced_single_image"
+Run all:    pytest models/demos/qwen38/demo/vision_demo.py -v -s
+Run single: pytest models/demos/qwen38/demo/vision_demo.py -v -s -k "traced_single_image"
+Run TP:     MESH_DEVICE=P150x4 pytest models/demos/qwen38/demo/vision_demo.py -v -s -k "traced_single_image"
 """
 
 import json
@@ -41,7 +41,7 @@ from qwen_vl_utils import process_vision_info
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tt.model import Qwen36Model
+from models.demos.qwen38.tt.model import Qwen38Model
 from models.tt_transformers.tt.generator import Generator
 
 # Multi-device (TP) is selected via MESH_DEVICE (e.g. P150x4). On a single device the mesh is
@@ -65,7 +65,7 @@ DEVICE_PARAMS = [
     }
 ]
 
-SAMPLE_PROMPTS_DIR = "models/demos/blackhole/qwen36/demo/sample_prompts"
+SAMPLE_PROMPTS_DIR = "models/demos/qwen38/demo/sample_prompts"
 
 BLOCK_SIZE = 64
 PREFILL_CHUNK = 2048  # chunked-prefill chunk; prompts are processed in chunks of this size
@@ -311,7 +311,7 @@ def test_demo_vision(mesh_device, prompt_file, use_trace, max_generated_tokens, 
     device.enable_program_cache()
 
     t0 = time.time()
-    model = Qwen36Model.from_pretrained(
+    model = Qwen38Model.from_pretrained(
         device,
         max_batch_size=1,
         max_seq_len=max_seq_len,
@@ -368,7 +368,7 @@ def _run_traced_vision_generation(model, tokenizer, device, token_ids, vision_in
     we capture the per-chunk prefill trace and replay it; ``prefill_traced_chunked`` stages the
     image rows into the persistent splice buffers per chunk via host->device copies only.
     """
-    from models.demos.blackhole.qwen36.tt.generator_interface import prime_decode_trace
+    from models.demos.qwen38.tt.generator_interface import prime_decode_trace
 
     T = token_ids.shape[1]
     kv_cache_shape = [num_blocks, model.args.n_kv_heads, BLOCK_SIZE, model.args.head_dim]

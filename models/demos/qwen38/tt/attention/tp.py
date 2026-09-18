@@ -13,8 +13,8 @@ import torch
 
 import ttnn
 from models.common.hadamard import HadamardRotation
-from models.demos.blackhole.qwen36.tt import tp_common as tpc
-from models.demos.blackhole.qwen36.tt.attention.rope_tp import apply_partial_rope_decode, apply_partial_rope_prefill
+from models.demos.qwen38.tt import tp_common as tpc
+from models.demos.qwen38.tt.attention.rope_tp import apply_partial_rope_decode, apply_partial_rope_prefill
 from models.tt_transformers.tt.ccl import tt_all_reduce
 
 

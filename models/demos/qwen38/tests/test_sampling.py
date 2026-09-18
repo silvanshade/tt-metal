@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Qwen3.6 on-device sampling integration regressions.
+"""Qwen3.8 on-device sampling integration regressions.
 
 Run:
-  MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.6-27B \
-    pytest -svq models/demos/blackhole/qwen36/tests/test_sampling.py
+  MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.8-27B \
+    pytest -svq models/demos/qwen38/tests/test_sampling.py
 """
 
 from types import SimpleNamespace
@@ -15,8 +15,8 @@ import torch
 
 import ttnn
 from models.common.sampling.generator import SamplingGenerator, SamplingParams, format_sampling_params
-from models.demos.blackhole.qwen36.tests.test_factory import parametrize_mesh_tp
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
+from models.demos.qwen38.tests.test_factory import parametrize_mesh_tp
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 from models.tt_transformers.tt.generator import Generator
 
 
@@ -67,8 +67,8 @@ def test_decode_only_unseeded_sampling_initializes_rng(mesh_device, reset_seeds,
     from the separate sampling-trace correctness issue.
     """
     if mesh_device.get_num_devices() == 1:
-        pytest.skip("Qwen3.6-27B sampling is the TP path; run with MESH_DEVICE=P150x4 or P150x8")
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=128)
+        pytest.skip("Qwen3.8-27B sampling is the TP path; run with MESH_DEVICE=P150x4 or P150x8")
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=128)
     args.sampling_dp = 1
 
     sampling = SamplingGenerator(args=args, mesh_device=mesh_device, tt_ccl=None)

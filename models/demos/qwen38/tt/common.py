@@ -6,8 +6,8 @@ import os
 
 from loguru import logger
 
-from models.demos.blackhole.qwen36.tt.model import Qwen36Model
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
+from models.demos.qwen38.tt.model import Qwen38Model
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 
 
 def create_tt_model(
@@ -23,13 +23,13 @@ def create_tt_model(
 
     HF_MODEL (env var) is the single source of truth. `hf_model`, if given, sets it.
     `layer_indices` runs ONLY the listed checkpoint layers (profiling); it takes precedence
-    over `n_layers` (first-N truncation). See Qwen36Model.from_pretrained for details.
+    over `n_layers` (first-N truncation). See Qwen38Model.from_pretrained for details.
     `force_tp` selects the sharded modules for MTP even with one device and one request.
     """
     if hf_model is not None:
         os.environ["HF_MODEL"] = hf_model
 
-    args = Qwen36ModelArgs(
+    args = Qwen38ModelArgs(
         mesh_device=mesh_device,
         max_batch_size=max_batch_size,
         max_seq_len=max_seq_len,
@@ -47,7 +47,7 @@ def create_tt_model(
         args.n_layers = n_layers
         args.attention_type_list = args.attention_type_list[:n_layers]
 
-    # NOTE: the warm-ttnn-cache HF-load skip is DISABLED for qwen3.6.
+    # NOTE: the warm-ttnn-cache HF-load skip is DISABLED for qwen3.8.
     # Its Gated-DeltaNet loader consumes conv weights on the host without a cache_file_name --
     # gdn/weights.py::load_conv_weight does ttnn.from_torch(state_dict[name], ...) for q/k/v_conv in
     # every DeltaNet layer, and gdn/tp.py derives taps the same way -- so a dataless placeholder
@@ -55,9 +55,9 @@ def create_tt_model(
     # the vision demo emit token soup, on the text path. Re-enabling needs those conv weights either
     # cache-backed or captured to the sidecar via an is_host_weight predicate. (#45400 review)
     cache_path = args.weight_cache_path()
-    logger.info("Loading + remapping weights via Qwen36ModelArgs.load_state_dict()...")
+    logger.info("Loading + remapping weights via Qwen38ModelArgs.load_state_dict()...")
     state_dict = args.load_state_dict()
 
-    model = Qwen36Model(mesh_device, args, state_dict, tensor_cache_path=cache_path)
+    model = Qwen38Model(mesh_device, args, state_dict, tensor_cache_path=cache_path)
 
     return args, model, state_dict

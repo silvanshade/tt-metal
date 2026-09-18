@@ -3,13 +3,13 @@
 """TP validation for the Qwen3.5/3.6 SwiGLU MLP on a Blackhole mesh.
 
 Loads just one layer's gate/up/down weights from the FP8 checkpoint (fast,
-RAM-light), runs the tensor-parallel Qwen36MLP forward, and compares against a
+RAM-light), runs the tensor-parallel Qwen38MLP forward, and compares against a
 torch SwiGLU reference. Output is fractured along the hidden dim (reduce-scatter)
 so it is gathered with ConcatMeshToTensor(dim=3).
 
 Run:
-    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.6-27B \
-        pytest models/demos/blackhole/qwen36/tests/test_mlp_tp.py -v -s
+    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.8-27B \
+        pytest models/demos/qwen38/tests/test_mlp_tp.py -v -s
 """
 import os
 
@@ -18,7 +18,7 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import comp_pcc
-from models.demos.blackhole.qwen36.tests.test_factory import (
+from models.demos.qwen38.tests.test_factory import (
     get_pcc_threshold,
     load_mlp_layer,
     model_path,
@@ -27,25 +27,25 @@ from models.demos.blackhole.qwen36.tests.test_factory import (
     shard_to_device,
     tp_composer,
 )
-from models.demos.blackhole.qwen36.tt.mlp import Qwen36MLP
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
+from models.demos.qwen38.tt.mlp import Qwen38MLP
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 
 
 @torch.no_grad()
 @parametrize_mesh_tp()
 def test_mlp_tp(mesh_device, reset_seeds, ensure_gc, request):
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     logger.info(f"devices={nd} dim={args.dim} hidden_dim={args.hidden_dim}")
 
-    # args.CKPT_DIR is the resolved local snapshot dir (Qwen36ModelArgs downloads the hub id).
+    # args.CKPT_DIR is the resolved local snapshot dir (Qwen38ModelArgs downloads the hub id).
     mlp_state = load_mlp_layer(args.CKPT_DIR, 0)
 
     from models.tt_transformers.tt.ccl import TT_CCL
 
     tt_ccl = TT_CCL(mesh_device) if nd > 1 else None
-    mlp = Qwen36MLP(mesh_device, mlp_state, None, args=args, tt_ccl=tt_ccl)
+    mlp = Qwen38MLP(mesh_device, mlp_state, None, args=args, tt_ccl=tt_ccl)
 
     # Torch reference: down(silu(gate(x)) * up(x))
     T = 32
@@ -71,7 +71,7 @@ def test_mlp_tp_prefill(mesh_device, reset_seeds, ensure_gc, request):
     """Prefill-path (S>32) TP MLP vs torch SwiGLU. Exercises the 2D prefill matmul for w1/w3
     and the (now default) explicit w2 down-proj progcfg."""
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=4096)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=4096)
     nd = mesh_device.get_num_devices()
     logger.info(f"devices={nd} dim={args.dim} hidden_dim={args.hidden_dim}")
 
@@ -80,7 +80,7 @@ def test_mlp_tp_prefill(mesh_device, reset_seeds, ensure_gc, request):
     from models.tt_transformers.tt.ccl import TT_CCL
 
     tt_ccl = TT_CCL(mesh_device) if nd > 1 else None
-    mlp = Qwen36MLP(mesh_device, mlp_state, None, args=args, tt_ccl=tt_ccl)
+    mlp = Qwen38MLP(mesh_device, mlp_state, None, args=args, tt_ccl=tt_ccl)
 
     # Torch reference: down(silu(gate(x)) * up(x)) at prefill seq length.
     T = 2048

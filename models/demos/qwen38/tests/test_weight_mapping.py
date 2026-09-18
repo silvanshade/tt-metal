@@ -5,9 +5,9 @@
 import pytest
 import torch
 
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
-from models.demos.blackhole.qwen36.tt.tp_common import replicate_kv_weight
-from models.demos.blackhole.qwen36.tt.weight_mapping import remap_qwen36_state_dict
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
+from models.demos.qwen38.tt.tp_common import replicate_kv_weight
+from models.demos.qwen38.tt.weight_mapping import remap_qwen38_state_dict
 
 HIDDEN_SIZE = 4096
 NUM_LAYERS = 32
@@ -33,13 +33,13 @@ def _load_raw_state_dict(checkpoint_dir):
 
 @pytest.fixture(scope="module")
 def raw_state_dict():
-    args = Qwen36ModelArgs(mesh_device=None)
+    args = Qwen38ModelArgs(mesh_device=None)
     return _load_raw_state_dict(args.CKPT_DIR)
 
 
 @pytest.fixture(scope="module")
 def remapped(raw_state_dict):
-    return remap_qwen36_state_dict(raw_state_dict)
+    return remap_qwen38_state_dict(raw_state_dict)
 
 
 class TestPrefixStripping:
@@ -176,7 +176,7 @@ class TestReplicateKVWeight:
     receive exactly the KV head that its GQA query group attends to.
     """
 
-    # Qwen3.6-27B full-attention geometry.
+    # Qwen3.8-27B full-attention geometry.
     N_HEADS = 24
     N_KV_HEADS = 4
     HEAD_DIM = 256

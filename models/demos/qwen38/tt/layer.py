@@ -8,15 +8,15 @@ based on the layer index. Both share the same RMSNorm + residual pattern and MLP
 
 import ttnn
 from models.common.rmsnorm import RMSNorm
-from models.demos.blackhole.qwen36.tt.attention import AttentionConfig, Qwen36GatedAttention
-from models.demos.blackhole.qwen36.tt.gdn import GDNConfig, Qwen36GatedDeltaNet
-from models.demos.blackhole.qwen36.tt.gdn.verification import GDNVerification
-from models.demos.blackhole.qwen36.tt.mlp import Qwen36MLP
-from models.demos.blackhole.qwen36.utils.substate import substate
+from models.demos.qwen38.tt.attention import AttentionConfig, Qwen38GatedAttention
+from models.demos.qwen38.tt.gdn import GDNConfig, Qwen38GatedDeltaNet
+from models.demos.qwen38.tt.gdn.verification import GDNVerification
+from models.demos.qwen38.tt.mlp import Qwen38MLP
+from models.demos.qwen38.utils.substate import substate
 from models.tt_transformers.tt.common import Mode
 
 
-class Qwen36DecoderLayer:
+class Qwen38DecoderLayer:
     """Single transformer layer with hybrid attention dispatch.
 
     Pattern: x → attention_norm → attention → residual → ff_norm → MLP → residual
@@ -29,7 +29,7 @@ class Qwen36DecoderLayer:
         self.args = args
         self.tt_ccl = tt_ccl
         self.num_devices = getattr(args, "num_devices", 1)
-        # Sharded-module path (see Qwen36ModelArgs.tp_path): TP modules, DistributedNorm, TP forward
+        # Sharded-module path (see Qwen38ModelArgs.tp_path): TP modules, DistributedNorm, TP forward
         # signatures. True on a mesh or for max_batch_size > 1 on one device.
         self.tp_path = getattr(args, "tp_path", self.num_devices > 1)
         self.is_full_attention = args.is_full_attention_layer(layer_num)
@@ -65,7 +65,7 @@ class Qwen36DecoderLayer:
             enable_all_gather=not self._fuse_norm_agmm,
         )
         # Prefill: ff_norm skips AG (fused into gate/up AGMM); decode gathers pre-norm so this is a no-op there.
-        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+        from models.demos.qwen38.tt import tp_common as tpc
 
         # MoE layers gather in the norm (the sparse MoE + shared expert need full/replicated
         # hidden and do NOT run the fused gate/up AGMM), so only fuse for the dense MLP.
@@ -88,14 +88,14 @@ class Qwen36DecoderLayer:
             # single-threaded) reorder+shard of the full 27B.
             tp_cache = (tensor_cache_path / f"layers.{layer_num}" / "tp") if tensor_cache_path else None
             if self.is_full_attention:
-                from models.demos.blackhole.qwen36.tt.attention.tp import TPAttention, load_attention_weights_tp
+                from models.demos.qwen38.tt.attention.tp import TPAttention, load_attention_weights_tp
 
                 tw = load_attention_weights_tp(
                     mesh_device, substate(state_dict, f"layers.{layer_num}.self_attn"), args, cache_dir=tp_cache
                 )
                 self.attention = TPAttention(mesh_device, args, tw, tt_ccl, qk_rotation=qk_rotation)
             else:
-                from models.demos.blackhole.qwen36.tt.gdn.tp import TPGatedDeltaNet, load_gdn_weights_tp
+                from models.demos.qwen38.tt.gdn.tp import TPGatedDeltaNet, load_gdn_weights_tp
 
                 tw = load_gdn_weights_tp(
                     mesh_device, substate(state_dict, f"layers.{layer_num}.linear_attn"), args, cache_dir=tp_cache
@@ -104,27 +104,26 @@ class Qwen36DecoderLayer:
         elif self.is_full_attention:
             attn_state = substate(state_dict, f"layers.{layer_num}.self_attn")
             attn_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
-            self.attention = Qwen36GatedAttention(
+            self.attention = Qwen38GatedAttention(
                 mesh_device, AttentionConfig.from_args(args), attn_state, attn_cache, qk_rotation=qk_rotation
             )
         else:
             gdn_state = substate(state_dict, f"layers.{layer_num}.linear_attn")
             gdn_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
-            self.attention = Qwen36GatedDeltaNet(mesh_device, GDNConfig.from_args(args), gdn_state, gdn_cache)
+            self.attention = Qwen38GatedDeltaNet(mesh_device, GDNConfig.from_args(args), gdn_state, gdn_cache)
 
         mlp_state = substate(state_dict, f"layers.{layer_num}.mlp")
         mlp_cache = (tensor_cache_path / f"layers.{layer_num}") if tensor_cache_path else None
         if args.is_moe_layer(layer_num):
-            # Sparse MoE MLP (Qwen3.5-MoE). Qwen36MoE.forward(x) keeps the same
-            # single-in/single-out signature + fractured-hidden output as Qwen36MLP,
-            # so the forward below and the model/trace-capture loops are unchanged.
-            from models.demos.blackhole.qwen36.tt.moe import MoEConfig, Qwen36MoE
+            # The sparse MoE has the same single-in/single-out fractured-hidden interface
+            # as the dense MLP, so forward and trace capture share this call site.
+            from models.demos.qwen38.tt.moe import MoEConfig, Qwen38MoE
 
-            self.feed_forward = Qwen36MoE(
+            self.feed_forward = Qwen38MoE(
                 mesh_device, MoEConfig.from_args(args), mlp_state, mlp_cache, args=args, tt_ccl=tt_ccl
             )
         else:
-            self.feed_forward = Qwen36MLP(mesh_device, mlp_state, mlp_cache, args=args, tt_ccl=tt_ccl)
+            self.feed_forward = Qwen38MLP(mesh_device, mlp_state, mlp_cache, args=args, tt_ccl=tt_ccl)
 
     def _make_norm(
         self,
@@ -195,7 +194,7 @@ class Qwen36DecoderLayer:
             # PREFILL: distributed rmsnorm outputs in L1 so the fused in-proj AGMM gathers from L1, not DRAM.
             if _norm_mode == Mode.PREFILL:
                 _attn_norm_config = {**_attn_norm_config, "distributed_output_mem_config": ttnn.L1_MEMORY_CONFIG}
-            # DECODE ff_norm uses the attn_norm layout (act_shard_hidden, 32-core) so Qwen36MLP's input reshard is a no-op and the norm runs on 32 cores not 8; PREFILL keeps the framework ff config.
+            # DECODE ff_norm uses the attn_norm layout (act_shard_hidden, 32-core) so Qwen38MLP's input reshard is a no-op and the norm runs on 32 cores not 8; PREFILL keeps the framework ff config.
             if _norm_mode == Mode.DECODE:
                 _ff_norm_config = self.args.get_norm_config("attn", _norm_mode)
             else:

@@ -26,10 +26,10 @@ from vllm.model_executor.models.qwen3_5 import (
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 import ttnn
-from models.demos.blackhole.qwen36.tt.common import create_tt_model
-from models.demos.blackhole.qwen36.tt.generator_interface import prefill_dispatch, warmup_decode_buckets
-from models.demos.blackhole.qwen36.tt.mtp import Qwen36MTP
-from models.demos.blackhole.qwen36.tt.mtp_round import Qwen36MTPRound
+from models.demos.qwen38.tt.common import create_tt_model
+from models.demos.qwen38.tt.generator_interface import prefill_dispatch, warmup_decode_buckets
+from models.demos.qwen38.tt.mtp import Qwen38MTP
+from models.demos.qwen38.tt.mtp_round import Qwen38MTPRound
 from models.tt_transformers.tt.generator import Generator
 
 _PREFILL_WARMUP_CHUNK = 2048
@@ -49,7 +49,7 @@ class TT_Qwen3_5ProcessingInfo(Qwen3_5ProcessingInfo):
 @MULTIMODAL_REGISTRY.register_processor(
     Qwen3VLMultiModalProcessor, info=TT_Qwen3_5ProcessingInfo, dummy_inputs=Qwen3VLDummyInputsBuilder
 )
-class Qwen36ForCausalLM(Generator, SupportsMultiModal):
+class Qwen38ForCausalLM(Generator, SupportsMultiModal):
     """vLLM-compatible wrapper for Qwen3.5-9B on Blackhole P150."""
 
     # Decode bucketing keeps several traces live and refreshes the selected
@@ -74,7 +74,7 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
             mesh_shape = tuple(int(dim) for dim in model.mesh_device.shape)
             logits_per_device = math.ceil(model.args.vocab_size / model.num_devices)
             raise RuntimeError(
-                "Qwen3.6 on-device sampling requires a certified TP topology (1x4 or 1x8) "
+                "Qwen3.8 on-device sampling requires a certified TP topology (1x4 or 1x8) "
                 f"with at most 65536 logits/device; got mesh={mesh_shape}, "
                 f"vocab={model.args.vocab_size}, logits/device={logits_per_device}. "
                 "Unset sample_on_device_mode for host sampling."
@@ -92,13 +92,13 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
     ) -> int:
         """All-user KV capacity (the shared paged-KV token pool).
 
-        QWEN36_MAX_TOKENS_ALL_USERS overrides it with a FIXED pool (set per device+model from the
+        QWEN38_MAX_TOKENS_ALL_USERS overrides it with a FIXED pool (set per device+model from the
         tt-inference-server spec's env_vars, mirroring GEMMA4_MAX_TOKENS_ALL_USERS). This decouples
         the pool from max_model_len × max_num_seqs so ONE config serves both a single long request
         (up to max_model_len) and a batch of shorter ones (sum of lengths ≤ pool) — e.g. 524288 =
         1×256K or 8×64K. Without the override, fall back to max_model_len × max_num_seqs (the old
         per-config product) so existing single-mode specs are unchanged."""
-        override = os.environ.get("QWEN36_MAX_TOKENS_ALL_USERS")
+        override = os.environ.get("QWEN38_MAX_TOKENS_ALL_USERS")
         if override:
             return int(override)
         if max_model_len is not None:
@@ -159,7 +159,7 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
             force_tp=bool(num_speculative_tokens),
         )
         if num_speculative_tokens:
-            model.mtp = Qwen36MTP.from_pretrained(
+            model.mtp = Qwen38MTP.from_pretrained(
                 model, Path(name_or_path).expanduser(), max_verify_tokens=num_speculative_tokens + 1
             )
         # Attach the TT vision tower so prefill can splice image/video embeddings (multimodal path).
@@ -463,7 +463,7 @@ class Qwen36ForCausalLM(Generator, SupportsMultiModal):
         mtp = getattr(self.model[0], "mtp", None)
         if mtp is not None:
             if not enable_trace and getattr(self, "mtp_round", None) is None:
-                self.mtp_round = Qwen36MTPRound(mtp, kwargs["num_blocks"])
+                self.mtp_round = Qwen38MTPRound(mtp, kwargs["num_blocks"])
                 self.mtp_round.warmup()
             elif enable_trace and not self.mtp_round.traces:
                 self.mtp_round.capture()

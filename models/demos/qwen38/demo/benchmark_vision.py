@@ -12,16 +12,16 @@ Examples
 --------
 Single device (default mesh (1,1)), full-depth, real weights::
 
-    python models/demos/blackhole/qwen36/demo/benchmark_vision.py
+    python models/demos/qwen38/demo/benchmark_vision.py
 
 Quick iteration with random weights and a couple of layers::
 
-    python models/demos/blackhole/qwen36/demo/benchmark_vision.py \
+    python models/demos/qwen38/demo/benchmark_vision.py \
         --dummy-weights --num-layers 2 --iters 5
 
 A 4-device tensor-parallel mesh, custom image grids (t,h,w patches), more iters::
 
-    python models/demos/blackhole/qwen36/demo/benchmark_vision.py \
+    python models/demos/qwen38/demo/benchmark_vision.py \
         --mesh-shape 1 4 --grid 1,86,128 --grid 1,40,40 --iters 20
 
 Notes
@@ -123,8 +123,8 @@ def main():
             pass
 
         # Imported here so the device is open / fabric is configured first.
-        from models.demos.blackhole.qwen36.tt.vision.model import DropInVisionTransformer
-        from models.demos.blackhole.qwen36.tt.vision.vision_model_config import VisionModelArgs
+        from models.demos.qwen38.tt.vision.model import DropInVisionTransformer
+        from models.demos.qwen38.tt.vision.vision_model_config import VisionModelArgs
 
         logger.info("Building VisionModelArgs...")
         model_args = VisionModelArgs(

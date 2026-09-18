@@ -10,7 +10,7 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tests.test_factory import compute_pcc, get_pcc_threshold
+from models.demos.qwen38.tests.test_factory import compute_pcc, get_pcc_threshold
 
 from .conftest import DEVICE_PARAMS
 
@@ -20,8 +20,8 @@ pytestmark = [run_for_blackhole(), pytest.mark.parametrize("device_params", DEVI
 def test_deltanet_pcc(device, setup, request):
     """Compare TTNN deltanet against the torch reference for layer 0."""
     args, sd, raw = setup
-    from models.demos.blackhole.qwen36.tt.gdn import GDNConfig, Qwen36GatedDeltaNet
-    from models.demos.blackhole.qwen36.utils.substate import substate
+    from models.demos.qwen38.tt.gdn import GDNConfig, Qwen38GatedDeltaNet
+    from models.demos.qwen38.utils.substate import substate
     from models.experimental.gated_attention_gated_deltanet.torch_functional.gated_deltanet import (
         gated_deltanet_forward,
     )
@@ -72,7 +72,7 @@ def test_deltanet_pcc(device, setup, request):
     )
 
     # TTNN
-    deltanet = Qwen36GatedDeltaNet(device, GDNConfig.from_args(args), substate(sd, f"layers.{layer_num}.linear_attn"))
+    deltanet = Qwen38GatedDeltaNet(device, GDNConfig.from_args(args), substate(sd, f"layers.{layer_num}.linear_attn"))
     deltanet.reset_state(B)
     x_t = ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
     out = ttnn.to_torch(deltanet.forward(x_t, mode="recurrent"))

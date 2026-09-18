@@ -6,7 +6,7 @@ The orchestrating layer lives in ``gated_attention.py``; this package re-exports
 (and ``AttentionConfig``) as the public API.
 """
 
-from models.demos.blackhole.qwen36.tt.attention.config import AttentionConfig
-from models.demos.blackhole.qwen36.tt.attention.gated_attention import Qwen36GatedAttention
+from models.demos.qwen38.tt.attention.config import AttentionConfig
+from models.demos.qwen38.tt.attention.gated_attention import Qwen38GatedAttention
 
-__all__ = ["Qwen36GatedAttention", "AttentionConfig"]
+__all__ = ["Qwen38GatedAttention", "AttentionConfig"]

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Verification for the qwen36 decode-batch bucketing fix (branch atupe/qwen36-bucketing-fix).
+"""Verification for the qwen38 decode-batch bucketing fix (branch atupe/qwen36-bucketing-fix).
 
 1. ``test_bucket_selection`` (no device): bucket-picking arithmetic for padded vLLM batches.
 2. ``test_bucketed_decode_matches_full_width`` (device): width-B matches full-width rows.
@@ -19,20 +19,20 @@ from ttnn.tools import trace_allocation_tracker
 
 import ttnn
 from models.common.utility_functions import comp_pcc
-from models.demos.blackhole.qwen36.tests.test_factory import parametrize_mesh_tp
-from models.demos.blackhole.qwen36.tt.model import Qwen36Model
+from models.demos.qwen38.tests.test_factory import parametrize_mesh_tp
+from models.demos.qwen38.tt.model import Qwen38Model
 
 N_LAYERS = 8
 
 BLOCK = 64
-# ISL under test. Override with QWEN36_BUCKET_TEST_CTX to compare against a server run at a
+# ISL under test. Override with QWEN38_BUCKET_TEST_CTX to compare against a server run at a
 # different ISL (the benchmark sweep was trimmed to 4096).
-CTX = int(os.environ.get("QWEN36_BUCKET_TEST_CTX", "8192"))
+CTX = int(os.environ.get("QWEN38_BUCKET_TEST_CTX", "8192"))
 BPU = CTX // BLOCK  # blocks per user
 
 
 def _pick_bucket(tokens, start_pos, width):
-    """Bucket arithmetic lifted verbatim from qwen36_vllm.decode_forward (the code under test)."""
+    """Bucket arithmetic lifted verbatim from qwen38_vllm.decode_forward (the code under test)."""
     num_active = int((start_pos != -1).sum()) if start_pos is not None else width
     num_active = max(1, min(num_active, width))
     return min(width, 1 << max(0, (num_active - 1).bit_length()))
@@ -68,7 +68,7 @@ def test_bucket_selection():
 
 
 def test_unsupported_device_sampling_fails_at_startup(expect_error):
-    from models.demos.blackhole.qwen36.tt.qwen36_vllm import Qwen36ForCausalLM
+    from models.demos.qwen38.tt.qwen38_vllm import Qwen38ForCausalLM
 
     model = SimpleNamespace(
         sampling=None,
@@ -78,9 +78,9 @@ def test_unsupported_device_sampling_fails_at_startup(expect_error):
     )
     wrapper = SimpleNamespace(model=[model])
 
-    Qwen36ForCausalLM._validate_device_sampling_request(wrapper, False)
+    Qwen38ForCausalLM._validate_device_sampling_request(wrapper, False)
     with expect_error(RuntimeError, "requires a certified TP topology"):
-        Qwen36ForCausalLM._validate_device_sampling_request(wrapper, True)
+        Qwen38ForCausalLM._validate_device_sampling_request(wrapper, True)
 
 
 def test_trace_buffer_reuse_is_opt_in(monkeypatch):
@@ -97,7 +97,7 @@ def test_trace_buffer_reuse_is_opt_in(monkeypatch):
 
 
 def test_bucket_warmup_compiles_all_widths_before_capture(monkeypatch):
-    from models.demos.blackhole.qwen36.tt.generator_interface import warmup_decode_buckets
+    from models.demos.qwen38.tt.generator_interface import warmup_decode_buckets
 
     calls = []
 
@@ -184,7 +184,7 @@ def test_bucketed_host_logits_are_padded_to_serving_width(monkeypatch, width):
     monkeypatch.setattr(ttnn, "to_torch", lambda tensor: tensor)
     model = SimpleNamespace(num_devices=4, args=SimpleNamespace(vocab_size=vocab))
 
-    got = Qwen36Model.process_output_decode(model, opaque, serving_width, S=1)
+    got = Qwen38Model.process_output_decode(model, opaque, serving_width, S=1)
 
     assert got.shape == (serving_width, 1, vocab)
     assert torch.equal(got[:width, 0], device_logits.reshape(width, vocab))
@@ -209,7 +209,7 @@ def test_tp8_device_logprobs_complete_full_decode_warmup(monkeypatch):
     model = SimpleNamespace(num_devices=8)
 
     def process_output_decode(tt_out, B, S=1, is_tokens=False, is_log_probs=False):
-        return Qwen36Model.process_output_decode(
+        return Qwen38Model.process_output_decode(
             model,
             tt_out,
             B,
@@ -257,8 +257,8 @@ def test_tp8_device_logprobs_complete_full_decode_warmup(monkeypatch):
 
 
 def _build(mesh_device, bmax):
-    model = Qwen36Model.from_pretrained(
-        mesh_device, max_batch_size=bmax, max_seq_len=CTX, n_layers=N_LAYERS, hf_model="Qwen/Qwen3.6-27B"
+    model = Qwen38Model.from_pretrained(
+        mesh_device, max_batch_size=bmax, max_seq_len=CTX, n_layers=N_LAYERS, hf_model="Qwen/Qwen3.8-27B"
     )
     num_blocks = bmax * BPU
     kv_shape = (num_blocks, model.args.n_local_kv_heads, BLOCK, model.args.head_dim)
@@ -308,8 +308,8 @@ def test_bucketed_decode_matches_full_width(mesh_device, reset_seeds, ensure_gc)
 
 def _parametrize_traced(max_tp=8, trace_bytes=1073741824):
     """Same mesh/fabric params as parametrize_mesh_tp, plus a trace region (needed to capture)."""
-    from models.demos.blackhole.qwen36.tests.test_factory import _resolve_mesh_shape
-    from models.demos.blackhole.qwen36.tt.model_config import GDN_CONV1D_L1_SMALL_SIZE
+    from models.demos.qwen38.tests.test_factory import _resolve_mesh_shape
+    from models.demos.qwen38.tt.model_config import GDN_CONV1D_L1_SMALL_SIZE
 
     shape = _resolve_mesh_shape(max_tp)
 
@@ -361,9 +361,9 @@ def test_gdn_prefix_write_trace(mesh_device, reset_seeds, ensure_gc):
     the supplied interleaved TILE output.
     """
     BMAX, NV, DK, DV = 8, 12, 128, 128
-    B = int(os.environ.get("QWEN36_PREFIX_WRITE_WIDTH", "1"))
-    assert B in (1, 2, 4, 8), f"QWEN36_PREFIX_WRITE_WIDTH must be 1, 2, 4, or 8; got {B}"
-    iters = int(os.environ.get("QWEN36_PREFIX_WRITE_ITERS", "100"))
+    B = int(os.environ.get("QWEN38_PREFIX_WRITE_WIDTH", "1"))
+    assert B in (1, 2, 4, 8), f"QWEN38_PREFIX_WRITE_WIDTH must be 1, 2, 4, or 8; got {B}"
+    iters = int(os.environ.get("QWEN38_PREFIX_WRITE_ITERS", "100"))
     assert iters > 0
 
     # 48 cores make every supported width tile-aligned:
@@ -463,8 +463,8 @@ def test_decode_width_scaling_traced(mesh_device, n_layers, reset_seeds, ensure_
 
     BMAX = 8
     ITERS = 50
-    model = Qwen36Model.from_pretrained(
-        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=n_layers, hf_model="Qwen/Qwen3.6-27B"
+    model = Qwen38Model.from_pretrained(
+        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=n_layers, hf_model="Qwen/Qwen3.8-27B"
     )
     num_blocks = BMAX * BPU
     kv_shape = (num_blocks, model.args.n_local_kv_heads, BLOCK, model.args.head_dim)
@@ -474,11 +474,11 @@ def test_decode_width_scaling_traced(mesh_device, n_layers, reset_seeds, ensure_
     logger.info(f"model built with {n_layers_actual} layers, ctx={CTX}, Bmax={BMAX}")
 
     out = {}
-    # QWEN36_BUCKET_TEST_WIDTHS restricts the widths measured. Needed to run this harness against a
+    # QWEN38_BUCKET_TEST_WIDTHS restricts the widths measured. Needed to run this harness against a
     # tree WITHOUT the bucketing change, whose decode graph only accepts the full width: width 1
     # there dies in reshape (new_volume == old_volume). "8" then yields the full-width baseline the
     # bucketing saving must be measured against.
-    widths = tuple(int(w) for w in os.environ.get("QWEN36_BUCKET_TEST_WIDTHS", "1,8").split(","))
+    widths = tuple(int(w) for w in os.environ.get("QWEN38_BUCKET_TEST_WIDTHS", "1,8").split(","))
     for width in widths:
         model.reset_tp()
         tokens = torch.tensor([[100 + u] for u in range(width)], dtype=torch.int32)
@@ -522,7 +522,7 @@ def test_decode_width_scaling_traced(mesh_device, n_layers, reset_seeds, ensure_
 def test_decode_capacity_width1_traced(mesh_device, reset_seeds, ensure_gc):
     """Capacity-only device cost at live width 1 (true Bmax=1 vs Bmax=8).
 
-    Set ``QWEN36_CAPACITY_TEST_BMAX`` to 1 or 8 in separate pytest processes.
+    Set ``QWEN38_CAPACITY_TEST_BMAX`` to 1 or 8 in separate pytest processes.
     On-device logits; no sampling replay (both round to 32 slots). Optional:
     ``N_LAYERS``, ``LAYER_INDEX`` (3 = first full-attn), ``EAGER_PROFILE=1``
     for per-op Tracy rows instead of aggregate trace time.
@@ -531,23 +531,23 @@ def test_decode_capacity_width1_traced(mesh_device, reset_seeds, ensure_gc):
 
     from models.tt_transformers.tt.common import copy_host_to_device
 
-    bmax = int(os.environ.get("QWEN36_CAPACITY_TEST_BMAX", "8"))
-    assert bmax in (1, 8), f"QWEN36_CAPACITY_TEST_BMAX must be 1 or 8, got {bmax}"
-    n_layers_env = os.environ.get("QWEN36_CAPACITY_TEST_N_LAYERS")
+    bmax = int(os.environ.get("QWEN38_CAPACITY_TEST_BMAX", "8"))
+    assert bmax in (1, 8), f"QWEN38_CAPACITY_TEST_BMAX must be 1 or 8, got {bmax}"
+    n_layers_env = os.environ.get("QWEN38_CAPACITY_TEST_N_LAYERS")
     n_layers = int(n_layers_env) if n_layers_env is not None else None
-    assert n_layers is None or 1 <= n_layers <= 64, f"QWEN36_CAPACITY_TEST_N_LAYERS must be in [1,64], got {n_layers}"
-    layer_index_env = os.environ.get("QWEN36_CAPACITY_TEST_LAYER_INDEX")
+    assert n_layers is None or 1 <= n_layers <= 64, f"QWEN38_CAPACITY_TEST_N_LAYERS must be in [1,64], got {n_layers}"
+    layer_index_env = os.environ.get("QWEN38_CAPACITY_TEST_LAYER_INDEX")
     layer_indices = [int(layer_index_env)] if layer_index_env is not None else None
     assert not (n_layers is not None and layer_indices is not None), (
-        "Set only one of QWEN36_CAPACITY_TEST_N_LAYERS or " "QWEN36_CAPACITY_TEST_LAYER_INDEX"
+        "Set only one of QWEN38_CAPACITY_TEST_N_LAYERS or " "QWEN38_CAPACITY_TEST_LAYER_INDEX"
     )
     assert (
         layer_indices is None or 0 <= layer_indices[0] < 64
-    ), f"QWEN36_CAPACITY_TEST_LAYER_INDEX must be in [0,63], got {layer_indices}"
-    trials = int(os.environ.get("QWEN36_CAPACITY_TEST_TRIALS", "5"))
-    iters = int(os.environ.get("QWEN36_CAPACITY_TEST_ITERS", "20"))
-    warmup = int(os.environ.get("QWEN36_CAPACITY_TEST_WARMUP", "3"))
-    eager_profile = os.environ.get("QWEN36_CAPACITY_TEST_EAGER_PROFILE") == "1"
+    ), f"QWEN38_CAPACITY_TEST_LAYER_INDEX must be in [0,63], got {layer_indices}"
+    trials = int(os.environ.get("QWEN38_CAPACITY_TEST_TRIALS", "5"))
+    iters = int(os.environ.get("QWEN38_CAPACITY_TEST_ITERS", "20"))
+    warmup = int(os.environ.get("QWEN38_CAPACITY_TEST_WARMUP", "3"))
+    eager_profile = os.environ.get("QWEN38_CAPACITY_TEST_EAGER_PROFILE") == "1"
     assert trials > 0 and iters > 0 and warmup >= 0
 
     # Start decode at CTX and leave enough RoPE/KV capacity for every captured,
@@ -557,13 +557,13 @@ def test_decode_capacity_width1_traced(mesh_device, reset_seeds, ensure_gc):
     blocks_per_user = (max_seq_len + BLOCK - 1) // BLOCK
     blocks_per_user = ((blocks_per_user + 7) // 8) * 8
 
-    model = Qwen36Model.from_pretrained(
+    model = Qwen38Model.from_pretrained(
         mesh_device,
         max_batch_size=bmax,
         max_seq_len=max_seq_len,
         n_layers=n_layers,
         layer_indices=layer_indices,
-        hf_model="Qwen/Qwen3.6-27B",
+        hf_model="Qwen/Qwen3.8-27B",
     )
     assert model.sampling is not None, "on-device logits require the sampling module"
     sampler_batch = model.sampling.tt_sampling.max_batch_size
@@ -666,8 +666,8 @@ def test_decode_step_host_overhead(mesh_device, reset_seeds, ensure_gc):
     from models.tt_transformers.tt.common import copy_host_to_device
 
     BMAX, ITERS, WIDTH = 8, 50, 1
-    model = Qwen36Model.from_pretrained(
-        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=None, hf_model="Qwen/Qwen3.6-27B"
+    model = Qwen38Model.from_pretrained(
+        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=None, hf_model="Qwen/Qwen3.8-27B"
     )
     num_blocks = BMAX * BPU
     kv_shape = (num_blocks, model.args.n_local_kv_heads, BLOCK, model.args.head_dim)
@@ -730,8 +730,8 @@ def test_bucketed_on_device_sampling_traces(mesh_device, reset_seeds, ensure_gc)
     from models.tt_transformers.tt.common import copy_host_to_device
 
     BMAX = 8
-    model = Qwen36Model.from_pretrained(
-        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=N_LAYERS, hf_model="Qwen/Qwen3.6-27B"
+    model = Qwen38Model.from_pretrained(
+        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=N_LAYERS, hf_model="Qwen/Qwen3.8-27B"
     )
     if model.sampling is None:
         pytest.skip("on-device sampling unsupported on this mesh/vocab; nothing to verify")
@@ -831,8 +831,8 @@ def test_all_buckets_fit_trace_region(mesh_device, reset_seeds, ensure_gc):
     from models.tt_transformers.tt.common import copy_host_to_device
 
     BMAX = 8
-    model = Qwen36Model.from_pretrained(
-        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=None, hf_model="Qwen/Qwen3.6-27B"
+    model = Qwen38Model.from_pretrained(
+        mesh_device, max_batch_size=BMAX, max_seq_len=CTX, n_layers=None, hf_model="Qwen/Qwen3.8-27B"
     )
     num_blocks = BMAX * BPU
     kv_shape = (num_blocks, model.args.n_local_kv_heads, BLOCK, model.args.head_dim)

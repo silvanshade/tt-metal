@@ -14,7 +14,7 @@ q/k-norm shapes ``[1, 1, 16, 256]`` and ``[1, 1, 32, 128]`` (rms_norm reduces
 over the last dim).
 
 Requires a Blackhole P150 device.
-Run: pytest models/demos/blackhole/qwen36/tests/unit/test_rms_norm.py -v
+Run: pytest models/demos/qwen38/tests/unit/test_rms_norm.py -v
 """
 import pytest
 import torch
@@ -22,8 +22,8 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tests.test_factory import compute_pcc
-from models.demos.blackhole.qwen36.tt.rms_norm import rms_norm_ttnn
+from models.demos.qwen38.tests.test_factory import compute_pcc
+from models.demos.qwen38.tt.rms_norm import rms_norm_ttnn
 
 pytestmark = run_for_blackhole()
 EPS = 1e-6

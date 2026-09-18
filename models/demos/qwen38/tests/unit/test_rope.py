@@ -4,7 +4,7 @@
 
 This validates the rope module on its own — both the host-side frequency
 generator (``compute_rope_freqs``) and the on-device setup/lookup
-(``Qwen36RoPESetup``) against the analytic torch reference.
+(``Qwen38RoPESetup``) against the analytic torch reference.
 
 Qwen3.5 uses *partial* rotary embeddings: only ``rope_head_dim`` (64) of the
 256-wide head is rotated, and the cos/sin table is GPT-NeoX style — the first
@@ -12,7 +12,7 @@ and second halves are duplicated (``cat([angles, angles])``), NOT interleaved
 like the Meta/Llama format.
 
 Requires a Blackhole P150 device.
-Run: pytest models/demos/blackhole/qwen36/tests/unit/test_rope.py -v
+Run: pytest models/demos/qwen38/tests/unit/test_rope.py -v
 """
 from types import SimpleNamespace
 
@@ -22,8 +22,8 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tests.test_factory import compute_pcc
-from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup, compute_rope_freqs
+from models.demos.qwen38.tests.test_factory import compute_pcc
+from models.demos.qwen38.tt.rope import Qwen38RoPESetup, compute_rope_freqs
 
 pytestmark = run_for_blackhole()
 
@@ -52,7 +52,7 @@ def rope_setup(device):
         max_seq_len=MAX_SEQ_LEN,
         rope_theta=ROPE_THETA,
     )
-    return Qwen36RoPESetup(device, args), args
+    return Qwen38RoPESetup(device, args), args
 
 
 class TestComputeRopeFreqs:

@@ -4,13 +4,13 @@
 
 import ttnn
 from models.common.hadamard import HadamardRotation
-from models.demos.blackhole.qwen36.tt.attention.config import AttentionConfig
-from models.demos.blackhole.qwen36.tt.attention.decode import decode_forward
-from models.demos.blackhole.qwen36.tt.attention.prefill import prefill_forward
-from models.demos.blackhole.qwen36.tt.attention.weights import load_attention_weights
+from models.demos.qwen38.tt.attention.config import AttentionConfig
+from models.demos.qwen38.tt.attention.decode import decode_forward
+from models.demos.qwen38.tt.attention.prefill import prefill_forward
+from models.demos.qwen38.tt.attention.weights import load_attention_weights
 
 
-class Qwen36GatedAttention:
+class Qwen38GatedAttention:
     """Gated Full Attention layer for Qwen3.5-9B with KV cache.
 
     Uses softmax SDPA with GQA (16 Q heads, 4 KV heads, head_dim=256)

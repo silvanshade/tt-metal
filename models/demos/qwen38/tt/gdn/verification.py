@@ -6,7 +6,7 @@
 import torch
 
 import ttnn
-from models.demos.blackhole.qwen36.tt.gdn.tp import TPGatedDeltaNet
+from models.demos.qwen38.tt.gdn.tp import TPGatedDeltaNet
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_ops import fused_decay_and_write_ttnn
 
 
