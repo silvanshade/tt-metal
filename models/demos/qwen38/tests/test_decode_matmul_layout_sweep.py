@@ -15,6 +15,13 @@ Arms:
   ``num_workers_per_dram_bank`` and every legal ``in0_block_w``.
 * ``auto`` — no program config, for the shapes the model leaves to the ttnn default (LM head).
 
+The swept ``cores`` axis is the in0 shard grid — the storage cores the activation is width-sharded
+over — not the matmul's worker set, which is always one worker per DRAM bank times
+``num_workers_per_dram_bank``. At one worker per bank that axis is flat within 0.5%; at two the
+16- and 24-core grids run 8-39% slower than the others at the same ``in0_block_w``, which is an
+open storage-core placement question. ``tp_common._find_grid`` returns 32 for every served K, so
+the shipped configuration does not use those grids.
+
 Durations are device program durations taken from the runtime profiler callback, so the reported
 rate excludes host dispatch and excludes the activation reshard each arm needs; the reshard is
 measured separately and reported in its own column. Effective GB/s is padded weight bytes over

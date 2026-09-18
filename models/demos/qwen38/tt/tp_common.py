@@ -144,13 +144,17 @@ def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None, num_worke
 
 
 def create_matmul_1d_decode_progcfg(m, k, n, num_cores, fused_activation=None, fp32_acc=True, grid_w=8):
-    """Explicit-grid 1D (mcast_in0) decode matmul progcfg on ~`num_cores` cores — small grids beat
-    the ~80-core DRAM-sharded grid on the bandwidth-bound skinny decode matmuls. Weight must be interleaved.
+    """Explicit-grid 1D (mcast_in0) decode matmul progcfg on ~`num_cores` cores. Weight must be
+    interleaved. This is the QWEN38_DECODE_MATMUL=1d arm: on the served decode shapes it runs
+    1.08-1.51x slower than the DRAM-sharded arm, which is the default — the sharded reader bursts
+    whole multi-tile rows of its own bank instead of one 576-B page per weight tile
+    (tests/test_decode_matmul_layout_sweep.py).
 
     Grid is shaped WIDE-first (cols up to `grid_w`, the device worker-grid width — 11 on BH P150, 8 on
     WH): for a fixed core budget a wide-short grid shortens the in0 multicast column and beats a
-    tall-narrow one (~2% on this matmul; see test_mlp_matmul_sweep wide1d_* vs forced1d_*). Default
-    grid_w=8 preserves the legacy shaping for callers that don't pass the device width."""
+    tall-narrow one (~2% on this matmul, measured while tuning this arm; no sweep in the tree
+    reproduces that wide-versus-tall comparison). Default grid_w=8 preserves the legacy shaping for
+    callers that don't pass the device width."""
     cols = min(grid_w, num_cores)
     rows = math.ceil(num_cores / cols)
     m_tiles = math.ceil(m / TILE_SIZE)
@@ -177,7 +181,8 @@ def create_matmul_1d_decode_progcfg(m, k, n, num_cores, fused_activation=None, f
 
 def matmul_1d_decode(x, weight, decode_1d_progcfg, compute_cfg, out_memory_config=ttnn.L1_MEMORY_CONFIG):
     """Small-grid 1D (mcast_in0) decode matmul on an interleaved weight; interleaves the K-sharded
-    activation first since mcast_in0 needs the full K per core. See test_mlp_matmul_sweep."""
+    activation first since mcast_in0 needs the full K per core. This is the 1d arm's call site; see
+    the 1d control of tests/test_decode_matmul_layout_sweep.py."""
     x_il = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
     out = ttnn.linear(
         x_il,
@@ -322,8 +327,8 @@ def create_prefill_mlp_matmul_program_config(m, k, n, fused_activation=None, max
 
     max_cols caps the grid width. Default = prefill_grid_default()[0] (8). Pass the device worker-grid
     width (11 on BH P150) to let the subblock heuristic go wide -> the measured prefill winners
-    (gate 9-wide, down/wo 10-wide, gdn_qkvz 11-wide; test_mlp_matmul_sweep_prefill). Fused AG/RS paths
-    pin 8-wide separately and are unaffected.
+    (gate 9-wide, down/wo 10-wide, gdn_qkvz 11-wide; measured during prefill tuning, no sweep in the
+    tree reproduces it). Fused AG/RS paths pin 8-wide separately and are unaffected.
 
     tuning: a `_PREFILL_TUNING` entry. With `widest_cols` (TP=8) the subblock-first width heuristic
     is replaced by "take the width, clamped to PREFILL_MAX_COLS_PORTABLE" -- measured device time at

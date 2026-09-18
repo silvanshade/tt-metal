@@ -279,7 +279,8 @@ class Qwen38MLP:
             _silu_fused = True
         elif x.shape[-2] > ttnn.TILE_SIZE:
             # Prefill (M>1 tile, compute-bound): FPU-tuned 2D config (grid width -> 1x4 subblock,
-            # in0_block_w=4) beats ttnn-auto's 1x1 stall ~2.7x (test_mlp_matmul_sweep_prefill). SILU fused.
+            # in0_block_w=4) beats ttnn-auto's 1x1 stall ~2.7x (measured during prefill tuning; no
+            # sweep in the tree reproduces it). SILU fused.
             seq = x.shape[-2]
             # max_cols = device worker-grid width (11 on BH): wide grid (gate/up -> 9x10) vs old 8-wide.
             _gw = getattr(args, "decode_grid_w", 8)
@@ -306,8 +307,8 @@ class Qwen38MLP:
                 w3_out = ttnn.linear(x, w.w3, compute_kernel_config=ckc, memory_config=mc)
             else:
                 # L1 output (gate/up outputs; down output via mc_out below): +FPU, avoids the DRAM
-                # round-trip (test_mlp_matmul_sweep_prefill *_outL1). The [seq,N] tensors fit L1 at
-                # the prefill chunk.
+                # round-trip (measured during prefill tuning; no sweep in the tree reproduces it).
+                # The [seq,N] tensors fit L1 at the prefill chunk.
                 w1_out = ttnn.linear(
                     x, w.w1, compute_kernel_config=ckc, program_config=pc_gate, memory_config=ttnn.L1_MEMORY_CONFIG
                 )
