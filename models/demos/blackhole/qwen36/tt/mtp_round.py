@@ -29,6 +29,7 @@ class Qwen36MTPRound:
         self.drafts = mtp.max_verify_tokens - 1
         assert self.drafts > 0
         self.mapper = ttnn.ReplicateTensorToMesh(self.mesh)
+        self.composer = ttnn.ConcatMeshToTensor(self.mesh, dim=0)
         self.frames = {}
         self.traces = {}
         self.pending = None
@@ -47,6 +48,9 @@ class Qwen36MTPRound:
                 "delta": self._scalar(0),
                 "budget": self._scalar(self.drafts + 2),
                 "accepted": self._scalar(1),
+                "accepted_egress": self._tensor(
+                    torch.zeros(1, 1, dtype=torch.int32), ttnn.int32, ttnn.ROW_MAJOR_LAYOUT
+                ),
                 "correction": self._scalar(0),
                 "extent": self._scalar(self.drafts),
                 "offsets": self._tensor(torch.arange(count).reshape(1, 1, count, 1).float(), ttnn.float32),
@@ -94,6 +98,7 @@ class Qwen36MTPRound:
         return ttnn.reshape(ttnn.argmax(valid, dim=-1, keepdim=True), (logits.shape[-2], 1))
 
     def _verify(self, count: int, slot: int) -> None:
+
         frame = self.frames[count]
         positions = ttnn.add(frame["base"], frame["offsets"])
         cos, sin = self._rotations(positions, frame["delta"], count)
@@ -110,6 +115,7 @@ class Qwen36MTPRound:
         ttnn.deallocate(hidden)
 
     def _accept(self, count: int) -> None:
+
         frame = self.frames[count]
         tokens = ttnn.reshape(self._float(frame["tokens"]), (1, 1, count, 1))
         inputs = ttnn.reshape(self._float(frame["ids"]), (1, 1, count, 1))
@@ -121,6 +127,7 @@ class Qwen36MTPRound:
             accepted = ttnn.add(accepted, prefix)
             correction = ttnn.where(prefix, self._row(tokens, index), correction)
         ttnn.copy(accepted, frame["accepted"])
+        ttnn.copy(self._indices(accepted, (1, 1), ttnn.int32), frame["accepted_egress"])
         ttnn.copy(correction, frame["correction"])
 
     def _propose(self, count: int, anchor: ttnn.Tensor, hidden: ttnn.Tensor, position: ttnn.Tensor) -> None:
@@ -150,13 +157,21 @@ class Qwen36MTPRound:
             current = ttnn.reshape(self._float(token), (1, 1, 1, 1))
         ttnn.copy(ttnn.concat(rows, dim=0), frame["drafts"])
 
-    def _finish(self, count: int, slot: int) -> None:
+    def _finish(self, count: int, slot: int, *, full: bool) -> None:
+        """Finalize the selected prefix; full acceptance reuses verified scratch.
+
+        requires: pending verification; full implies every verifier input was accepted.
+        ensures: partial acceptance retains device-masked repair; feedback and drafts
+            follow the same accepted prefix on both captured paths.
+        """
+
         frame = self.frames[count]
         accepted = frame["accepted"]
         for verifier in self.verifier.gdn.values():
-            verifier.fold(accepted)
+            verifier.fold(count if full else accepted)
         self.verifier.count = 0
         self.verifier.slot = -1
+
         selected = self._row(frame["hidden"], 0)
         for index in range(1, count):
             active = ttnn.typecast(ttnn.eq(accepted, index + 1), selected.dtype)
@@ -185,6 +200,7 @@ class Qwen36MTPRound:
         )
         ttnn.copy(extent, frame["extent"])
         self._propose(count, frame["correction"], selected, next_position)
+
         ttnn.copy(selected, frame["previous"])
         self._pack(frame)
 
@@ -200,7 +216,10 @@ class Qwen36MTPRound:
             for slot in range(self.target.args.max_batch_size):
                 self._verify(count, slot)
                 self._accept(count)
-                self._finish(count, slot)
+                self._finish(count, slot, full=False)
+                self.verifier.slot = slot
+                self.verifier.record_replay(count)
+                self._finish(count, slot, full=True)
         frame = self.frames[1]
         self._propose(1, frame["correction"], frame["previous"], frame["base"])
 
@@ -209,17 +228,18 @@ class Qwen36MTPRound:
         assert not self.traces and all("logits" in frame for frame in self.frames.values())
         for count in self.frames:
             for slot in range(self.target.args.max_batch_size):
-                for phase in ("verify", "finish", "greedy"):
+                for phase, full in (("verify", False), ("finish", False), ("finish", True)):
                     if phase == "finish":
+                        self.verifier.slot = slot
                         self.verifier.record_replay(count)
                     trace = ttnn.begin_trace_capture(self.mesh, cq_id=0)
-                    if phase != "finish":
+                    if phase == "verify":
                         self._verify(count, slot)
                         self._accept(count)
-                    if phase != "verify":
-                        self._finish(count, slot)
+                    else:
+                        self._finish(count, slot, full=full)
                     ttnn.end_trace_capture(self.mesh, trace, cq_id=0)
-                    self.traces[phase, count, slot] = trace
+                    self.traces[phase, count, slot, full] = trace
                     if phase == "verify":
                         # Capture executed the verifier and left its checkpoint pending.
                         # Finalization capture consumes that exact pending block.
@@ -229,7 +249,7 @@ class Qwen36MTPRound:
         self._propose(1, frame["correction"], frame["previous"], frame["base"])
         self._pack(frame)
         ttnn.end_trace_capture(self.mesh, trace, cq_id=0)
-        self.traces["bridge", 1, 0] = trace
+        self.traces["bridge", 1, 0, False] = trace
 
     def stage(
         self, slot: int, tokens: list[int], position: int, pages: torch.Tensor, budget: int, rope_delta: int = 0
@@ -266,18 +286,27 @@ class Qwen36MTPRound:
                 torch.full((1, 1, 1, 1), value, dtype=torch.float32), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT
             )
             ttnn.copy_host_to_device_tensor(host, frame[name])
-        ttnn.execute_trace(self.mesh, self.traces["bridge", 1, 0], cq_id=0, blocking=False)
+        ttnn.execute_trace(self.mesh, self.traces["bridge", 1, 0, False], cq_id=0, blocking=False)
         self.pending = None
         return frame
 
     def execute(self, *, greedy: bool) -> dict[str, ttnn.Tensor]:
-        """Enqueue a staged round; borrowed results survive until that frame is reused."""
+        """Verify a staged round and choose finalization from its accepted count.
+
+        requires: one staged request; no overlapping frame use.
+        ensures: greedy execution synchronously reads one int32 count before
+            submitting full or partial finalization; policy execution leaves
+            finalization pending. Borrowed results survive until frame reuse.
+        """
         assert self.pending is not None
         count, slot = self.pending
         frame = self.frames[count]
-        phase = "greedy" if greedy else "verify"
-        ttnn.execute_trace(self.mesh, self.traces[phase, count, slot], cq_id=0, blocking=False)
+        ttnn.execute_trace(self.mesh, self.traces["verify", count, slot, False], cq_id=0, blocking=False)
         if greedy:
+            accepted = int(ttnn.to_torch(frame["accepted_egress"], mesh_composer=self.composer).reshape(-1)[0].item())
+            ttnn.execute_trace(
+                self.mesh, self.traces["finish", count, slot, accepted == count], cq_id=0, blocking=False
+            )
             ttnn.copy(frame["previous"], self.mtp.previous_hidden[slot])
             self.pending = None
         return frame
@@ -293,7 +322,7 @@ class Qwen36MTPRound:
                 torch.full((1, 1, 1, 1), value, dtype=torch.float32), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT
             )
             ttnn.copy_host_to_device_tensor(host, frame[name])
-        ttnn.execute_trace(self.mesh, self.traces["finish", count, slot], cq_id=0, blocking=False)
+        ttnn.execute_trace(self.mesh, self.traces["finish", count, slot, accepted == count], cq_id=0, blocking=False)
         ttnn.copy(frame["previous"], self.mtp.previous_hidden[slot])
         self.pending = None
         return frame
