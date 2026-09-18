@@ -135,7 +135,7 @@ def test_h128_rotation_preserves_input_dtype(ttnn_mesh_device: ttnn.MeshDevice) 
 
 
 @pytest.mark.parametrize("shape", [(1, 1, 32, 256), (1, 1, 4, 256), (1, 3, 65, 256)])
-def test_h256_sylvester_composition(ttnn_mesh_device, shape):
+def test_h256_sylvester_rotation(ttnn_mesh_device, shape):
     values = torch.randn(shape, generator=torch.Generator().manual_seed(352)).bfloat16()
     source = ttnn.from_torch(
         values,

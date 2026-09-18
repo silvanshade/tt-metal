@@ -1,9 +1,11 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Matrix-free orthogonal rotation for queries and quantized attention keys."""
+"""Orthogonal rotation for queries and quantized attention keys."""
 
 from math import prod
 from pathlib import Path
+
+import torch
 
 import ttnn
 
@@ -100,11 +102,11 @@ def hadamard_h128(tensor):
 
 
 class HadamardRotation:
-    """Apply a normalized Sylvester rotation without a persistent device matrix.
+    """Apply a normalized Sylvester rotation with a shared H256 matrix.
 
     Apply after RoPE and before key quantization; values stay in their original
-    basis. H128 intermediates are BFP8, not exact real-valued rotations. H256
-    combines them in the caller dtype; this widening cannot recover lost bits.
+    basis. H128 returns BFP8 before conversion to the caller dtype. H256 uses
+    one HiFi4 matmul rather than two padded-row H128 programs and their glue.
     Prefill casts K to cache dtype; decode cache updates receive caller BF16.
 
     # Specification
@@ -118,12 +120,12 @@ class HadamardRotation:
     and cache writes.
     """
 
-    def __init__(self, mesh_device, head_dim):
-        """Select the supported rotation width.
+    def __init__(self, mesh_device: ttnn.MeshDevice, head_dim: int) -> None:
+        """Select H128 or allocate the persistent H256 matrix.
 
         # Specification
-        - ensures: stores the selected head dimension without allocating a matrix.
-        - fails: ValueError for non-Blackhole or unsupported head dimensions.
+        - ensures: H256 shares one normalized BF16 matrix across calls; H128 allocates no matrix.
+        - fails: ValueError for non-Blackhole or unsupported head dimensions; runtime allocation errors propagate.
         - panics: none.
 
         # Adequacy
@@ -134,13 +136,33 @@ class HadamardRotation:
         if head_dim not in (128, 256):
             raise ValueError("Hadamard rotation supports head dimensions 128 and 256")
         self.head_dim = head_dim
+        if head_dim == 256:
+            matrix = torch.ones(1, 1, dtype=torch.float32)
+            while matrix.shape[0] < head_dim:
+                matrix = torch.cat((torch.cat((matrix, matrix), dim=1), torch.cat((matrix, -matrix), dim=1)), dim=0)
+            matrix *= head_dim**-0.5
+            self.matrix = ttnn.from_torch(
+                matrix,
+                dtype=ttnn.bfloat16,
+                layout=ttnn.TILE_LAYOUT,
+                device=mesh_device,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+                mesh_mapper=ttnn.ReplicateTensorToMesh(mesh_device),
+            )
+            self.compute_config = ttnn.init_device_compute_kernel_config(
+                mesh_device.arch(),
+                math_fidelity=ttnn.MathFidelity.HiFi4,
+                math_approx_mode=False,
+                fp32_dest_acc_en=True,
+                packer_l1_acc=False,
+            )
 
-    def __call__(self, tensor):
+    def __call__(self, tensor: ttnn.Tensor) -> ttnn.Tensor:
         """Consume an unrotated tensor; preserve its shape, dtype and memory.
 
         # Specification
         - requires: nonempty interleaved tiled tensor on Blackhole, with the selected width.
-        - ensures: returns normalized H128 or Sylvester-composed H256 in caller dtype.
+        - ensures: returns normalized H128 or H256 in caller dtype.
         - fails: ValueError for width mismatch or rejected H128 input; runtime allocation/dispatch errors propagate.
         - panics: none.
 
@@ -150,45 +172,26 @@ class HadamardRotation:
         """
         if tensor.shape[-1] != self.head_dim:
             raise ValueError("Hadamard input width must match the head dimension")
-        dtype, memory = tensor.dtype, tensor.memory_config()
+        if self.head_dim == 256:
+            result = ttnn.matmul(
+                tensor,
+                self.matrix,
+                dtype=tensor.dtype,
+                memory_config=tensor.memory_config(),
+                compute_kernel_config=self.compute_config,
+            )
+            ttnn.deallocate(tensor)
+            return result
+
+        dtype = tensor.dtype
         source = tensor if dtype == ttnn.bfloat16 else ttnn.typecast(tensor, ttnn.bfloat16)
-        if self.head_dim == 128:
-            rotated = hadamard_h128(source)
-            if dtype == rotated.dtype:
-                result = rotated
-            else:
-                result = ttnn.typecast(rotated, dtype)
-                ttnn.deallocate(rotated)
+        rotated = hadamard_h128(source)
+        if dtype == rotated.dtype:
+            result = rotated
         else:
-            start = [0] * len(source.shape)
-            end = list(source.shape)
-            end[-1] = 128
-            left = ttnn.slice(source, start, end)
-            start[-1], end[-1] = 128, 256
-            right = ttnn.slice(source, start, end)
-            if source is not tensor:
-                ttnn.deallocate(source)
-            ttnn.deallocate(tensor)
-            a = hadamard_h128(left)
-            ttnn.deallocate(left)
-            b = hadamard_h128(right)
-            ttnn.deallocate(right)
-            # H256 = [[H128,H128],[H128,-H128]] / sqrt(2),
-            # with each H128 already normalized. Widen only the combination
-            # to the caller dtype; the primitive result remains BFP8.
-            summed = ttnn.add(a, b, dtype=dtype, memory_config=memory)
-            difference = ttnn.subtract(a, b, dtype=dtype, memory_config=memory)
-            ttnn.deallocate(a)
-            ttnn.deallocate(b)
-            plus = ttnn.multiply(summed, 2**-0.5, memory_config=memory)
-            minus = ttnn.multiply(difference, 2**-0.5, memory_config=memory)
-            ttnn.deallocate(summed)
-            ttnn.deallocate(difference)
-            result = ttnn.concat([plus, minus], dim=-1, memory_config=memory)
-            ttnn.deallocate(plus)
-            ttnn.deallocate(minus)
-        if self.head_dim == 128:
-            if source is not tensor:
-                ttnn.deallocate(source)
-            ttnn.deallocate(tensor)
+            result = ttnn.typecast(rotated, dtype)
+            ttnn.deallocate(rotated)
+        if source is not tensor:
+            ttnn.deallocate(source)
+        ttnn.deallocate(tensor)
         return result
