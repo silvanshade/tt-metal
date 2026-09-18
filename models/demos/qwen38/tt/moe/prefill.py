@@ -82,7 +82,7 @@ def _process_prefill_chunk(hidden_states, routing_weights, weights: ExpertWeight
         dtype=ttnn.bfloat16,
     )
     # NB: do NOT deallocate hidden_grouped — it is a reshape *view* of the caller's
-    # input x, which Qwen36MoE.forward reuses for the shared expert after the routed
+    # input x, which Qwen38MoE.forward reuses for the shared expert after the routed
     # experts run. Freeing it here frees x (TT_FATAL: input not allocated).
     up_gate = ttnn.transpose(up_gate, 1, 3)
     up_gate = ttnn.reshape(up_gate, (1, num_experts, chunk_len, 2 * intermediate_size))
@@ -160,7 +160,7 @@ def prefill_forward(
             result_acc = result_concat
 
     # Row-parallel down_proj partials -> reduce-scatter (fractured hidden), matching
-    # Qwen36MLP._forward_tp.
+    # Qwen38MLP._forward_tp.
     if num_devices > 1:
         result_acc = tt_all_reduce(
             result_acc,

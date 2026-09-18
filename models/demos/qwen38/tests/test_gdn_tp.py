@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""TP validation for Qwen3.5/3.6 Gated DeltaNet on a Blackhole mesh.
+"""TP validation for Qwen3.5/3.6/3.8 Gated DeltaNet on a Blackhole mesh.
 Run:
-    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.6-27B \
-      pytest models/demos/blackhole/qwen36/tests/test_gdn_tp.py -v -s
+    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.8-27B \
+      pytest models/demos/qwen38/tests/test_gdn_tp.py -v -s
 """
+
 import os
 
 import pytest
@@ -14,7 +15,7 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import comp_pcc
-from models.demos.blackhole.qwen36.tests.test_factory import (
+from models.demos.qwen38.tests.test_factory import (
     compute_pcc,
     get_pcc_threshold,
     load_gdn_layer,
@@ -25,8 +26,8 @@ from models.demos.blackhole.qwen36.tests.test_factory import (
     shard_to_device,
     tp_composer,
 )
-from models.demos.blackhole.qwen36.tt.gdn.tp import TPGatedDeltaNet, load_gdn_weights_tp
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
+from models.demos.qwen38.tt.gdn.tp import TPGatedDeltaNet, load_gdn_weights_tp
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_ops import (
     recurrent_gated_delta_rule_decode_ttnn,
 )
@@ -43,12 +44,12 @@ def test_gdn_tp(mesh_device, B, reset_seeds, ensure_gc, request):
 
     """
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     logger.info(f"devices={nd} gdn layer={li} Nk_tp={args.gdn_nk_tp} Nv_tp={args.gdn_nv_tp}")
 
-    # args.CKPT_DIR is the resolved local snapshot dir (Qwen36ModelArgs downloads the hub id).
+    # args.CKPT_DIR is the resolved local snapshot dir (Qwen38ModelArgs downloads the hub id).
     sd = load_gdn_layer(args.CKPT_DIR, li)
     from models.tt_transformers.tt.ccl import TT_CCL
 
@@ -186,10 +187,10 @@ def test_gdn_tp_peruser_state(mesh_device, B, reset_seeds, ensure_gc, request):
     prefill+decode runs, proving correct row assembly with no cross-user contamination.
     """
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
     # forward_decode keys all shapes off self.B, so the B=1 reference needs its own
     # max_batch_size=1 args (weights tw are batch-independent and shared).
-    args1 = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args1 = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     logger.info(f"devices={nd} gdn layer={li} B={B}")
@@ -253,8 +254,8 @@ def test_gdn_tp_write_slot_and_remap(mesh_device, B, reset_seeds, ensure_gc, req
           is exactly the pre-remap rows reindexed (no cross-row contamination).
     """
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
-    args1 = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args1 = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     logger.info(f"devices={nd} gdn layer={li} B={B}")
@@ -332,8 +333,8 @@ def test_gdn_tp_batched_prefill(mesh_device, B, reset_seeds, ensure_gc, request)
     batches correctly with per-row masking. B capped at <=4 (see kernel BH limit note above).
     """
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
-    args1 = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args1 = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     logger.info(f"devices={nd} gdn layer={li} B={B}")
@@ -395,7 +396,7 @@ def test_gdn_tp_batched_prefill_chunked(mesh_device, B, reset_seeds, ensure_gc, 
     long-context batched prefill.
     """
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     sd = load_gdn_layer(args.CKPT_DIR, li)
@@ -444,7 +445,7 @@ def test_gdn_tp_prefill(mesh_device, reset_seeds, ensure_gc, request):
     """
     os.environ.setdefault("HF_MODEL", model_path())
     T = 128
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     logger.info(f"devices={nd} gdn layer={li} T={T}")
@@ -495,7 +496,7 @@ def test_gdn_tp_fused_chunk_prefill(mesh_device, monkeypatch, reset_seeds, ensur
     """
     os.environ.setdefault("HF_MODEL", model_path())
     T, chunk = 256, 128  # T > chunk => multiple internal chunks (cross-chunk recurrence exercised)
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=512)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=512)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     logger.info(f"devices={nd} gdn layer={li} T={T} chunk={chunk}")
@@ -512,7 +513,7 @@ def test_gdn_tp_fused_chunk_prefill(mesh_device, monkeypatch, reset_seeds, ensur
     x_tt = shard_to_device(mesh_device, x, dim=-1)
     composer = tp_composer(mesh_device)
 
-    import models.demos.blackhole.qwen36.tt.gdn.fused_chunk as fc
+    import models.demos.qwen38.tt.gdn.fused_chunk as fc
 
     assert fc.fused_chunk_enabled(), "fused chunk must be ON by default (production prefill path)"
 
@@ -564,7 +565,7 @@ def test_gdn_out_agmm_vs_mmrs(mesh_device, OUTER_CHUNK_SIZE, reset_seeds, ensure
     in-proj, whose S <= TILE_SIZE branch needs a full-width x while prefill hands GDN a K-sharded one.
     """
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=4096)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=4096)
     nd = mesh_device.get_num_devices()
     if nd == 1:
         pytest.skip("TP-only")
@@ -617,15 +618,15 @@ def test_gdn_out_agmm_deterministic_under_device_skew(mesh_device, monkeypatch, 
     lagging peer's gate multiply is still reading. Delay each device in turn right before the gate
     (ttnn.apply_device_delay) and require every run to be bit-identical to a reference computed with the
     devices synchronized before the out-projection."""
-    import models.demos.blackhole.qwen36.tt.gdn.tp as gdn_tp
-    from models.demos.blackhole.qwen36.tt import tp_common as tpc
+    import models.demos.qwen38.tt.gdn.tp as gdn_tp
+    from models.demos.qwen38.tt import tp_common as tpc
 
     os.environ.setdefault("HF_MODEL", model_path())
     nd = mesh_device.get_num_devices()
     if nd == 1:
         pytest.skip("TP-only")
     T = 2048
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=4096)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=4096)
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "linear_attention")
     sd = load_gdn_layer(args.CKPT_DIR, li)
     from models.tt_transformers.tt.ccl import TT_CCL

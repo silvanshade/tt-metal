@@ -6,9 +6,9 @@
 A single parametrized test covering prefill + decode across ISLs from 128 up to 256k
 (single-user) and batched serving (B=8/B=32, multi-device TP) up to 64k.
 
-Run all:      pytest models/demos/blackhole/qwen36/demo/text_demo.py -v -s
-Run 128:      pytest models/demos/blackhole/qwen36/demo/text_demo.py -v -s -k "traced_128"
-Run batched:  MESH_DEVICE=P150x4 pytest models/demos/blackhole/qwen36/demo/text_demo.py -v -s -k "b8"
+Run all:      pytest models/demos/qwen38/demo/text_demo.py -v -s
+Run 128:      pytest models/demos/qwen38/demo/text_demo.py -v -s -k "traced_128"
+Run batched:  MESH_DEVICE=P150x4 pytest models/demos/qwen38/demo/text_demo.py -v -s -k "b8"
 
 GDN prefill runs the fast fused path by DEFAULT — no env vars needed: chunk-parallel phase-split
 (PREP fanned across the grid + V-block SCAN), fp32 o output, fp32 state, and flat token-major q/k/v
@@ -32,7 +32,7 @@ from tracy import signpost
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tt.model import Qwen36Model
+from models.demos.qwen38.tt.model import Qwen38Model
 from models.demos.utils.llm_demo_utils import create_benchmark_data
 from models.perf.benchmarking_utils import BenchmarkProfiler
 from models.tt_transformers.tt.generator import Generator
@@ -54,7 +54,7 @@ DEVICE_PARAMS = [
     }
 ]
 
-SAMPLE_PROMPTS_DIR = "models/demos/blackhole/qwen36/demo/sample_prompts"
+SAMPLE_PROMPTS_DIR = "models/demos/qwen38/demo/sample_prompts"
 SHARED_PROMPTS_DIR = "models/demos/llama3_70b_galaxy/demo/sample_prompts"
 
 
@@ -252,7 +252,7 @@ def test_demo_text(
     max_seq_len = num_blocks * BLOCK_SIZE
 
     t0 = time.time()
-    model = Qwen36Model.from_pretrained(
+    model = Qwen38Model.from_pretrained(
         device,
         max_batch_size=batch,
         max_seq_len=max_seq_len,
@@ -607,7 +607,7 @@ def _run_tp_generation(model, tokenizer, token_ids, max_generated_tokens, num_bl
     decode_times = []
     signpost("inference_decode")
     profiler.start("inference_decode")
-    _DEBUG_TIMING = os.environ.get("QWEN36_DEBUG_DECODE_TIMING") == "1"
+    _DEBUG_TIMING = os.environ.get("QWEN38_DEBUG_DECODE_TIMING") == "1"
     _phase_times = {"update": [], "exec_sync": [], "readback": []}
     while len(generated) < max_generated_tokens:
         # Time the FULL decode step (input update + device decode + host readback + sampling),
@@ -778,7 +778,7 @@ def _run_tp_generation_batched(model, tokenizer, token_ids, max_generated_tokens
         page_table=page_table,
     )
 
-    # Batched decode readback mode (QWEN36_BATCHED_DECODE_MODE):
+    # Batched decode readback mode (QWEN38_BATCHED_DECODE_MODE):
     #   "shard" (default) - per-shard on-device argmax+max (generalizes _run_tp_generation's
     #            B=1 fast path to B>1): each device reduces its OWN vocab shard to (idx, max)
     #            on device, then only 2 tiny [num_devices, B] tensors are read to host — no
@@ -787,7 +787,7 @@ def _run_tp_generation_batched(model, tokenizer, token_ids, max_generated_tokens
     #            arg-maxing). Avoids the full logits HOST transfer but adds a real device-side
     #            all-gather; measured slower overall than "shard" — kept for comparison.
     #   "host"  - legacy: full [B,1,vocab] logits to host, then torch.argmax. Baseline.
-    _mode = os.environ.get("QWEN36_BATCHED_DECODE_MODE", "shard")
+    _mode = os.environ.get("QWEN38_BATCHED_DECODE_MODE", "shard")
     if _mode == "sample" and model.sampling is None:
         _mode = "host"
     if _mode == "shard":
@@ -872,7 +872,7 @@ def _run_tp_generation_batched(model, tokenizer, token_ids, max_generated_tokens
     # Time the FULL decode step (input update + device decode + host logit read + token select)
     # so the reported tok/s is real end-to-end throughput, not just the device compute.
     decode_times = []
-    _DEBUG_TIMING = os.environ.get("QWEN36_DEBUG_DECODE_TIMING") == "1"
+    _DEBUG_TIMING = os.environ.get("QWEN38_DEBUG_DECODE_TIMING") == "1"
     _phase_times = {"update": [], "exec_sync": [], "readback": [], "argmax": []}
     while len(generated[0]) < max_generated_tokens:
         t_step = time.time()
@@ -977,7 +977,7 @@ def _run_traced_generation(model, tokenizer, device, token_ids, max_generated_to
     gen = Generator([model], [model.args], device)
 
     # Decode trace with GDN snapshot/restore (stock capture would double-advance state)
-    from models.demos.blackhole.qwen36.tt.generator_interface import prime_decode_trace
+    from models.demos.qwen38.tt.generator_interface import prime_decode_trace
 
     signpost("compile_decode")
     prime_decode_trace(gen, model, torch.tensor([[next_token]], dtype=torch.long), torch.tensor([T]), page_table)

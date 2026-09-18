@@ -644,10 +644,10 @@ def _mmrs_prefill_shared_bufs(tt_ccl, M, N, nd, dtype):
     layers = infeasible). Prefill runs layers sequentially and each op's output is cloned before the
     next layer reuses the buffer, so ONE shared set per (M,N,nd,dtype) is safe. Allocated during the
     pre-capture warmup forward (eager), reused inside the trace. Keyed so variable M/dtype coexist."""
-    cache = getattr(tt_ccl, "_qwen36_mmrs_prefill_bufs", None)
+    cache = getattr(tt_ccl, "_qwen38_mmrs_prefill_bufs", None)
     if cache is None:
         cache = {}
-        tt_ccl._qwen36_mmrs_prefill_bufs = cache
+        tt_ccl._qwen38_mmrs_prefill_bufs = cache
     key = (M, N, nd, str(dtype))
     if key not in cache:
         mesh = tt_ccl.mesh_device

@@ -5,7 +5,7 @@
 Loads the projection / conv / norm weights for one `linear_attn` substate and
 precomputes the derived device tensors (conv taps, fused matmuls, prefill-kernel
 constants, cached chunk masks). Behavior-preserving extraction of the original
-`Qwen36GatedDeltaNet.__init__` weight code — every dtype / layout / memory_config
+`Qwen38GatedDeltaNet.__init__` weight code — every dtype / layout / memory_config
 and every env-var read is preserved verbatim.
 """
 from dataclasses import dataclass
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import torch
 
 import ttnn
-from models.demos.blackhole.qwen36.tt.gdn.config import GDNConfig
+from models.demos.qwen38.tt.gdn.config import GDNConfig
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_seq import create_chunk_masks_seq
 
 

@@ -15,8 +15,8 @@ mesh parametrization from ``test_factory``:
   concat-KV oracle at both the prefill and decode steps.
 
 Run:
-    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.6-27B \
-      pytest models/demos/blackhole/qwen36/tests/test_attention_tp.py -v -s
+    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.8-27B \
+      pytest models/demos/qwen38/tests/test_attention_tp.py -v -s
 """
 import os
 
@@ -25,7 +25,7 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import comp_pcc
-from models.demos.blackhole.qwen36.tests.test_factory import (
+from models.demos.qwen38.tests.test_factory import (
     compute_pcc,
     get_pcc_threshold,
     load_attn_layer,
@@ -37,9 +37,9 @@ from models.demos.blackhole.qwen36.tests.test_factory import (
     shard_to_device,
     tp_composer,
 )
-from models.demos.blackhole.qwen36.tt.attention.rope_tp import rot_mats_decode, rot_mats_prefill
-from models.demos.blackhole.qwen36.tt.attention.tp import TPAttention, load_attention_weights_tp
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
+from models.demos.qwen38.tt.attention.rope_tp import rot_mats_decode, rot_mats_prefill
+from models.demos.qwen38.tt.attention.tp import TPAttention, load_attention_weights_tp
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 
 
 def _rope_torch(x, rope_dim, theta):  # x: [S, H, HD]
@@ -62,12 +62,12 @@ def _rope_torch(x, rope_dim, theta):  # x: [S, H, HD]
 @parametrize_batch(batches=(8, 32))
 def test_attention_tp(mesh_device, B, reset_seeds, ensure_gc, request):
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "full_attention")
     logger.info(f"devices={nd} full-attn layer={li} NH={args.n_local_heads} NKV={args.n_local_kv_heads}")
 
-    # args.CKPT_DIR is the resolved local snapshot dir (Qwen36ModelArgs downloads the hub id).
+    # args.CKPT_DIR is the resolved local snapshot dir (Qwen38ModelArgs downloads the hub id).
     sd = load_attn_layer(args.CKPT_DIR, li)
     from models.tt_transformers.tt.ccl import TT_CCL
 
@@ -127,7 +127,7 @@ def test_attention_tp(mesh_device, B, reset_seeds, ensure_gc, request):
 def test_attention_tp_prefill(mesh_device, reset_seeds, ensure_gc, request):
     os.environ.setdefault("HF_MODEL", model_path())
     S = 64
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "full_attention")
     logger.info(f"devices={nd} full-attn layer={li} S={S}")
@@ -180,7 +180,7 @@ def test_attention_tp_prefill(mesh_device, reset_seeds, ensure_gc, request):
 @parametrize_mesh_tp()
 def test_attention_tp_paged(mesh_device, reset_seeds, ensure_gc, request):
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "full_attention")
     NKV, HD = args.n_local_kv_heads, args.head_dim
@@ -271,7 +271,7 @@ def test_attention_tp_paged_peruser(mesh_device, B, reset_seeds, ensure_gc, requ
     cur_pos, and paged_fill_cache batch_idx compose with no cross-user contamination.
     """
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
     nd = mesh_device.get_num_devices()
     li = next(i for i, t in enumerate(args.attention_type_list) if t == "full_attention")
     NKV, HD = args.n_local_kv_heads, args.head_dim
@@ -281,7 +281,7 @@ def test_attention_tp_paged_peruser(mesh_device, B, reset_seeds, ensure_gc, requ
 
     # forward_decode keys all shapes off self.B (== max_batch_size), so the B=1 reference
     # needs its own max_batch_size=1 args (weights tw are batch-independent and shared).
-    args1 = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
+    args1 = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256)
 
     sd = load_attn_layer(args.CKPT_DIR, li)
     from models.tt_transformers.tt.ccl import TT_CCL
@@ -386,7 +386,7 @@ def test_attention_tp_qknorm_offset(mesh_device):
     logits are ~14x too small, long-context attention goes UNIFORM, and 64k retrieval collapses.
     Builds a tiny synthetic state_dict and checks the loaded q_norm/k_norm equal raw weights + 1.
     """
-    from models.demos.blackhole.qwen36.tt.attention.tp import load_attention_weights_tp
+    from models.demos.qwen38.tt.attention.tp import load_attention_weights_tp
 
     nd = mesh_device.get_num_devices()
     HD = 128
@@ -452,7 +452,7 @@ def test_attention_tp_qknorm_offset(mesh_device):
 def test_attention_tp_verify_cache_lifetime(mesh_device, reset_seeds, ensure_gc):
     """Shared-sequence writes preserve K/V under page-table allocation pressure."""
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256, force_tp=True)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=1, max_seq_len=256, force_tp=True)
     layer = next(i for i, kind in enumerate(args.attention_type_list) if kind == "full_attention")
     from models.tt_transformers.tt.ccl import TT_CCL
 

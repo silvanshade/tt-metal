@@ -12,8 +12,8 @@ import os
 import torch
 
 import ttnn
-from models.demos.blackhole.qwen36.tt import tp_common as tpc
-from models.demos.blackhole.qwen36.tt.gdn.verify_recurrence import verify_recurrence
+from models.demos.qwen38.tt import tp_common as tpc
+from models.demos.qwen38.tt.gdn.verify_recurrence import verify_recurrence
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_ops import (
     l2_norm_ttnn,
     recurrent_gated_delta_rule_decode_ttnn,
@@ -237,7 +237,7 @@ class TPGatedDeltaNet:
         # Pre-build chunk masks once (trace-safe; avoids from_torch inside captured trace)
         self.chunk_seq_masks = create_chunk_masks_seq(args.gdn_chunk_size, mesh)
         # Prefill fused-op constant tiles, owned by this layer (avoids process-lifetime C++ cache vs device lifetime).
-        from models.demos.blackhole.qwen36.tt.gdn.fused_chunk import _FUSED_CHUNK_SIZE, build_fused_const_tiles
+        from models.demos.qwen38.tt.gdn.fused_chunk import _FUSED_CHUNK_SIZE, build_fused_const_tiles
 
         self._fused_const_tiles = build_fused_const_tiles(mesh, _FUSED_CHUNK_SIZE)
         self.conv_states = None
@@ -594,7 +594,7 @@ class TPGatedDeltaNet:
         ttnn.deallocate(a)
 
         # Fused chunk_gated_delta_rule; also used for masked valid_len.
-        from models.demos.blackhole.qwen36.tt.gdn.fused_chunk import (
+        from models.demos.qwen38.tt.gdn.fused_chunk import (
             chunk_gated_delta_rule_fused_adapter,
             fused_chunk_enabled,
         )
@@ -1021,7 +1021,7 @@ class TPGatedDeltaNet:
 
         # Chunk-parallel recurrence over the BH = B*Nv batch (each row an independent scan). Fused
         # chunk_gated_delta_rule (same op as single-user prefill); per-row valid_lens mask each user.
-        from models.demos.blackhole.qwen36.tt.gdn.fused_chunk import (
+        from models.demos.qwen38.tt.gdn.fused_chunk import (
             chunk_gated_delta_rule_fused_adapter,
             fused_chunk_enabled,
         )

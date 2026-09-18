@@ -5,10 +5,10 @@
 import torch
 
 import ttnn
-from models.demos.blackhole.qwen36.tt.mtp import Qwen36MTP
+from models.demos.qwen38.tt.mtp import Qwen38MTP
 
 
-class Qwen36MTPRound:
+class Qwen38MTPRound:
     """Own fixed-address frames for greedy rounds and host-policy target boundaries.
 
     requires: target and draft caches allocated; construction and warmup precede all
@@ -20,7 +20,7 @@ class Qwen36MTPRound:
         policy sampling consumes no discarded rows; slot reuse preserves isolation.
     """
 
-    def __init__(self, mtp: Qwen36MTP, page_width: int) -> None:
+    def __init__(self, mtp: Qwen38MTP, page_width: int) -> None:
         self.mtp = mtp
         self.target = mtp.target
         self.mesh = self.target.mesh_device

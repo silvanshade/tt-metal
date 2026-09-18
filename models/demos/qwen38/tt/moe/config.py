@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""MoE config, derived from the parsed HF text config via Qwen36ModelArgs."""
+"""MoE config, derived from the parsed HF text config via Qwen38ModelArgs."""
 
 from dataclasses import dataclass
 

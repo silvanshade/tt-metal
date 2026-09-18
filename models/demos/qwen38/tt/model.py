@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Qwen3.5-9B text model for Blackhole P150.
 
-tok_embeddings -> 32 x Qwen36DecoderLayer -> RMSNorm -> LM Head.
+tok_embeddings -> 32 x Qwen38DecoderLayer -> RMSNorm -> LM Head.
 Hybrid state: KV cache (8 attn layers) + recurrent state (24 DeltaNet layers).
 """
 
@@ -17,13 +17,13 @@ from tqdm import tqdm
 import ttnn
 from models.common.hadamard import HadamardRotation
 from models.common.rmsnorm import RMSNorm
-from models.demos.blackhole.qwen36.tt.layer import Qwen36DecoderLayer
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
-from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup
+from models.demos.qwen38.tt.layer import Qwen38DecoderLayer
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
+from models.demos.qwen38.tt.rope import Qwen38RoPESetup
 from models.tt_transformers.tt.common import Mode, get_block_size, num_blocks_in_seq
 
 
-class Qwen36Model:
+class Qwen38Model:
     """Qwen3.5-9B text LM on Blackhole P150. HF_MODEL env var selects checkpoint."""
 
     def __init__(self, mesh_device, args, state_dict, tensor_cache_path=None):
@@ -32,7 +32,7 @@ class Qwen36Model:
         self.device = mesh_device
         self.mesh_device = mesh_device  # Generator reads model.mesh_device
         self.num_devices = mesh_device.get_num_devices()
-        # Sharded-module path (Qwen36ModelArgs.tp_path): on a mesh, or on one device when
+        # Sharded-module path (Qwen38ModelArgs.tp_path): on a mesh, or on one device when
         # max_batch_size > 1. TT_CCL is a set of global semaphores; on a (1,1) mesh every
         # collective that consumes them is a no-op, so it is built whenever the path is.
         self.tp_path = getattr(args, "tp_path", self.num_devices > 1)
@@ -62,7 +62,7 @@ class Qwen36Model:
             # SAMPLING_AG_CONFIG in model_config.py and runs IN-TRACE (faster than eager). Decode
             # bucketing is made compatible with the in-trace sampler by namespacing the sampling
             # trace per bucket width (SamplingGenerator.set_trace_bucket, driven from
-            # qwen36_vllm.decode_forward) — see generator._validate_trace_inputs.
+            # qwen38_vllm.decode_forward) — see generator._validate_trace_inputs.
             self.sampling = SamplingGenerator(args=args, mesh_device=mesh_device, tt_ccl=self.tt_ccl)
         else:
             self.sampling = None
@@ -79,7 +79,7 @@ class Qwen36Model:
         )
 
         # RoPE setup (for gated attention layers only)
-        self.rope = Qwen36RoPESetup(mesh_device, args)
+        self.rope = Qwen38RoPESetup(mesh_device, args)
 
         # layer_indices (from from_pretrained) picks checkpoint layers; else 0..n_layers-1.
         # Each layer uses its real checkpoint index for weights and type (DeltaNet vs attn).
@@ -106,7 +106,7 @@ class Qwen36Model:
         logger.info(f"Loading {len(self.layer_indices)} transformer layers (indices={self.layer_indices})...")
         self.layers = []
         for i in tqdm(self.layer_indices, desc="Loading layers"):
-            layer = Qwen36DecoderLayer(
+            layer = Qwen38DecoderLayer(
                 mesh_device, args, state_dict, i, tensor_cache_path, tt_ccl=self.tt_ccl, qk_rotation=self.qk_rotation
             )
             self.layers.append(layer)
@@ -235,8 +235,8 @@ class Qwen36Model:
         """
         if self.vision_model is not None:
             return self.vision_model
-        from models.demos.blackhole.qwen36.tt.vision.model import DropInVisionTransformer
-        from models.demos.blackhole.qwen36.tt.vision.vision_model_config import VisionModelArgs
+        from models.demos.qwen38.tt.vision.model import DropInVisionTransformer
+        from models.demos.qwen38.tt.vision.vision_model_config import VisionModelArgs
 
         if vision_args is None:
             vision_args = VisionModelArgs(
@@ -558,7 +558,7 @@ class Qwen36Model:
 
             os.environ["HF_MODEL"] = hf_model
 
-        args = Qwen36ModelArgs(
+        args = Qwen38ModelArgs(
             mesh_device=device,
             max_batch_size=max_batch_size,
             max_seq_len=max_seq_len,
@@ -578,7 +578,7 @@ class Qwen36Model:
             args.n_layers = n_layers
             args.attention_type_list = args.attention_type_list[:n_layers]
 
-        # NOTE: the warm-ttnn-cache HF-load skip is DISABLED for qwen3.6.
+        # NOTE: the warm-ttnn-cache HF-load skip is DISABLED for qwen3.8.
         # Its Gated-DeltaNet loader consumes conv weights on the host without a cache_file_name --
         # gdn/weights.py::load_conv_weight does ttnn.from_torch(state_dict[name], ...) for q/k/v_conv in
         # every DeltaNet layer, and gdn/tp.py derives taps the same way -- so a dataless placeholder
@@ -586,7 +586,7 @@ class Qwen36Model:
         # the vision demo emit token soup, on the text path. Re-enabling needs those conv weights either
         # cache-backed or captured to the sidecar via an is_host_weight predicate. (#45400 review)
         cache_path = args.weight_cache_path()
-        logger.info("Loading + remapping weights via Qwen36ModelArgs.load_state_dict()...")
+        logger.info("Loading + remapping weights via Qwen38ModelArgs.load_state_dict()...")
         state_dict = args.load_state_dict()
 
         model = cls(device, args, state_dict, tensor_cache_path=cache_path)
@@ -651,7 +651,7 @@ class Qwen36Model:
 
     def decode_tp(self, token_id, pos):
         """Single-token TP decode at position `pos` (B=1). Uses KV + GDN from prefill/decode."""
-        from models.demos.blackhole.qwen36.tt.attention.rope_tp import rot_mats_decode
+        from models.demos.qwen38.tt.attention.rope_tp import rot_mats_decode
 
         tok = ttnn.from_torch(
             torch.tensor([[int(token_id)]], dtype=torch.int32),
@@ -2418,13 +2418,13 @@ class Qwen36Model:
         pt_host = ttnn.from_torch(page_table, dtype=ttnn.int32, layout=ttnn.ROW_MAJOR_LAYOUT)
         ttnn.copy_host_to_device_tensor(pt_host, self._chunk_full_page_table_buf)
 
-        # Replay trace for each full chunk. With QWEN36_CHUNK_PROGRESS (default on) each replay
+        # Replay trace for each full chunk. With QWEN38_CHUNK_PROGRESS (default on) each replay
         # blocks and logs a progress line, so a long prompt (266K = ~130 chunks, ~15 min) reports
         # progress instead of parking the host in one synchronize_device for the whole prefill and
         # looking like a wedge to an external watchdog. The copies are on the same command queue
         # either way; the cost of blocking is the ~ms of host prep that no longer overlaps the
-        # device per chunk. Set QWEN36_CHUNK_PROGRESS=0 for the fully queued replay.
-        progress = os.environ.get("QWEN36_CHUNK_PROGRESS", "1") != "0"
+        # device per chunk. Set QWEN38_CHUNK_PROGRESS=0 for the fully queued replay.
+        progress = os.environ.get("QWEN38_CHUNK_PROGRESS", "1") != "0"
         for c in range(num_full):
             cs = c * chunk_size
             tok_host = ttnn.from_torch(
@@ -2585,9 +2585,9 @@ class Qwen36Model:
         # DMAs aren't GC'd) and sync only every _SYNC_EVERY chunks — the host software-pipelines chunk
         # N+1's from_torch/tilize over chunk N's device exec. Periodic (not fully removed) sync bounds
         # in-flight queue depth so very long context (e.g. traced_128k = 64 chunks) can't overrun the
-        # command queue. QWEN36_PREFILL_OVERLAP=0 restores the per-chunk sync.
+        # command queue. QWEN38_PREFILL_OVERLAP=0 restores the per-chunk sync.
         _log_every = max(1, num_full // 4)
-        _overlap = os.environ.get("QWEN36_PREFILL_OVERLAP", "1") != "0"
+        _overlap = os.environ.get("QWEN38_PREFILL_OVERLAP", "1") != "0"
         _SYNC_EVERY = 8 if _overlap else 1
         _host_refs = []  # keep host tensors alive until the next sync frees their DMAs
         for c in range(num_full):
@@ -3254,7 +3254,7 @@ class Qwen36Model:
 
     def prepare_decode_inputs_host(self, tokens, current_pos, page_table=None):
         """Build HOST decode inputs: (tokens_tt, cur_pos_tt, rope_packed, page_table_tt)."""
-        from models.demos.blackhole.qwen36.tt.generator_interface import pack_rope_host
+        from models.demos.qwen38.tt.generator_interface import pack_rope_host
 
         B = tokens.shape[0]
         tokens_tt = ttnn.from_torch(tokens.to(torch.int32), dtype=ttnn.uint32, layout=ttnn.ROW_MAJOR_LAYOUT)
@@ -3310,7 +3310,7 @@ class Qwen36Model:
 
         on_device_logits=True: return the raw vocab-sharded shard for the on-device sampler.
         """
-        from models.demos.blackhole.qwen36.tt.generator_interface import unpack_rope
+        from models.demos.qwen38.tt.generator_interface import unpack_rope
 
         cos, sin = unpack_rope(rot_mat_idxs)
         if on_device_logits:

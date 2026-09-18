@@ -9,7 +9,7 @@ from .prefill import create_prefill_sparsity, prefill_forward
 from .weights import load_expert_weights
 
 
-class Qwen36Experts:
+class Qwen38Experts:
     def __init__(self, mesh_device, config, state_dict, tensor_cache_path=None, tt_ccl=None, topology=None):
         self.mesh_device = mesh_device
         self.config = config

@@ -22,8 +22,8 @@ GDN_CONV1D_L1_SMALL_SIZE = 24576
 DEFAULT_DECODE_MATMUL = "dram_sharded"
 
 
-class Qwen36ModelArgs(ModelArgs):
-    """ModelArgs for the Qwen3.5 / 3.6 family on Blackhole (9B / 27B / 35B-A3B; dense + MoE)."""
+class Qwen38ModelArgs(ModelArgs):
+    """ModelArgs for Qwen3.5 / 3.6 / 3.8 on Blackhole (9B / 27B / 35B-A3B; dense + MoE)."""
 
     # Opt into base ModelArgs TP > n_kv_heads path; attention/tp.py replicates via replicate_kv_weight.
     SUPPORTS_KV_REPLICATION = True
@@ -36,9 +36,9 @@ class Qwen36ModelArgs(ModelArgs):
         force_tp=False,
         **kwargs,
     ):
-        # HF_MODEL is canonical (defaults to Qwen/Qwen3.6-27B). Snapshot hub ids unless
+        # HF_MODEL is canonical (defaults to Qwen/Qwen3.8-27B). Snapshot hub ids unless
         # config.json exists locally (avoids cache-dir false positives).
-        hf_model = os.environ.setdefault("HF_MODEL", "Qwen/Qwen3.6-27B")
+        hf_model = os.environ.setdefault("HF_MODEL", "Qwen/Qwen3.8-27B")
         if not os.path.isfile(os.path.join(hf_model, "config.json")):
             from huggingface_hub import snapshot_download
 
@@ -98,7 +98,7 @@ class Qwen36ModelArgs(ModelArgs):
         # MoE (Qwen3.5-MoE / Qwen3-Next sparse layers). All read from the parsed
         # HF text config. Absent on the dense 9B/27B, where num_experts defaults
         # to 0 → is_moe_layer() is False everywhere and the validated dense
-        # Qwen36MLP path is byte-for-byte unchanged. For the 35B-A3B every layer
+        # Qwen38MLP path is byte-for-byte unchanged. For the 35B-A3B every layer
         # is MoE (decoder_sparse_step=1, mlp_only_layers=[]) with a gated shared
         # expert; see tt/moe/.
         # ------------------------------------------------------------------
@@ -131,7 +131,7 @@ class Qwen36ModelArgs(ModelArgs):
     def _init_tp_config(self, mesh_device):
         """Per-device sharded dims + DRAM matmul/mem configs for TP (num_devices>1)."""
         import ttnn
-        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+        from models.demos.qwen38.tt import tp_common as tpc
 
         tp = self.num_devices
         self.cluster_shape = list(mesh_device.shape)
@@ -167,7 +167,7 @@ class Qwen36ModelArgs(ModelArgs):
         self.gdn_qkvz_dim_tp = (self.gdn_qkv_dim + self.gdn_z_dim) // tp
         # Per-device width of the [qkv|z|a|b] fused in-projection: folding the tiny a/b (decay/beta)
         # projection into qkvz removes a whole decode matmul while keeping the (good) K=dim. Default
-        # (was QWEN36_GDN_FUSE_AB); gdn/tp.py fuses whenever the qkvz weight is DRAM-sharded.
+        # (was QWEN38_GDN_FUSE_AB); gdn/tp.py fuses whenever the qkvz weight is DRAM-sharded.
         self.gdn_qkvzab_dim_tp = self.gdn_qkvz_dim_tp + 2 * self.gdn_nv_tp
         self.gdn_value_dim_tp = self.gdn_value_dim // tp
         self.gdn_key_dim_tp = self.gdn_key_dim // tp
@@ -197,7 +197,7 @@ class Qwen36ModelArgs(ModelArgs):
         )
         self.attn_k_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, kv_dim_per_device)
         self.attn_v_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, kv_dim_per_device)
-        # Fused [q+gate | k | v] in-projection (P4: QWEN36_FUSED_QKV) — one column-parallel matmul.
+        # Fused [q+gate | k | v] in-projection (P4: QWEN38_FUSED_QKV) — one column-parallel matmul.
         self.attn_qkv_fused_dim_tp = self.n_local_heads * self.head_dim * 2 + 2 * kv_dim_per_device
         self.attn_qkv_fused_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.attn_qkv_fused_dim_tp)
         self.mlp_w1_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.hidden_dim // tp)
@@ -361,7 +361,7 @@ class Qwen36ModelArgs(ModelArgs):
         Follows the HF Qwen3-Next / Qwen3.5-MoE rule: a layer is MoE when there
         are experts, it is not forced dense (mlp_only_layers), and it falls on
         the decoder_sparse_step cadence. On the dense 9B/27B num_experts==0 so
-        this is always False and the Qwen36MLP path is byte-for-byte unchanged.
+        this is always False and the Qwen38MLP path is byte-for-byte unchanged.
         """
         if self.moe_num_experts <= 0:
             return False
@@ -417,15 +417,15 @@ class Qwen36ModelArgs(ModelArgs):
     def load_state_dict(self):
         """Load + remap weights via the text-only HF Qwen3_5ForCausalLM.
         Overrides base meta-key loader."""
-        from models.demos.blackhole.qwen36.tt.weight_mapping import (
+        from models.demos.qwen38.tt.weight_mapping import (
             is_fp8_checkpoint,
-            load_qwen36_state_dict_fp8,
-            remap_qwen36_state_dict,
+            load_qwen38_state_dict_fp8,
+            remap_qwen38_state_dict,
         )
 
         # Block FP8 checkpoints: dequant + remap for TP loaders (skip the HF model).
         if is_fp8_checkpoint(self.CKPT_DIR):
-            return load_qwen36_state_dict_fp8(self.CKPT_DIR)
+            return load_qwen38_state_dict_fp8(self.CKPT_DIR)
 
         # Import the HF classes directly rather than going through AutoModelForCausalLM.
         # Serving out-of-tree, vllm.transformers_utils.config registers vLLM's OWN
@@ -458,6 +458,6 @@ class Qwen36ModelArgs(ModelArgs):
             f"{self.vocab_size}, hidden_size {text_config.hidden_size} vs {self.dim}"
         )
         model = _HFForCausalLM.from_pretrained(self.CKPT_DIR, config=text_config, dtype="auto")
-        state_dict = remap_qwen36_state_dict(model.state_dict())
+        state_dict = remap_qwen38_state_dict(model.state_dict())
         del model
         return state_dict

@@ -6,7 +6,7 @@ Only runs on a MoE checkpoint (``args.moe_num_experts > 0``) — auto-skips on t
 9B/27B. Export the MoE checkpoint before running, e.g.:
 
     HF_MODEL=Qwen/Qwen3.6-35B-A3B MESH_DEVICE=P150 \
-        pytest models/demos/blackhole/qwen36/tests/unit/test_moe.py -v -s
+        pytest models/demos/qwen38/tests/unit/test_moe.py -v -s
 
 Loads just one layer's router + fused experts + shared-expert weights (RAM-light) so a
 single 35B layer fits on one P150.
@@ -18,13 +18,13 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tests.test_factory import (
+from models.demos.qwen38.tests.test_factory import (
     compute_pcc,
     get_pcc_threshold,
     load_moe_layer,
     torch_moe_reference,
 )
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 
 from .conftest import DEVICE_PARAMS
 
@@ -34,18 +34,18 @@ pytestmark = [run_for_blackhole(), pytest.mark.parametrize("device_params", DEVI
 @torch.no_grad()
 @pytest.mark.parametrize("seq_len, mode", [(1, "decode"), (32, "prefill")], ids=["decode", "prefill"])
 def test_moe_pcc(device, seq_len, mode, request):
-    args = Qwen36ModelArgs(mesh_device=device)
+    args = Qwen38ModelArgs(mesh_device=device)
     if args.moe_num_experts <= 0:
         pytest.skip("not a MoE checkpoint (moe_num_experts == 0)")
 
-    from models.demos.blackhole.qwen36.tt.moe import MoEConfig, Qwen36MoE
+    from models.demos.qwen38.tt.moe import MoEConfig, Qwen38MoE
 
     moe_state = load_moe_layer(args.CKPT_DIR, 0)
 
     x = torch.randn(1, 1, seq_len, args.dim, dtype=torch.bfloat16)
     ref = torch_moe_reference(moe_state, x[0, 0].float(), args.moe_top_k, args.moe_norm_topk_prob)  # [S, dim]
 
-    moe = Qwen36MoE(device, MoEConfig.from_args(args), moe_state, args=args)
+    moe = Qwen38MoE(device, MoEConfig.from_args(args), moe_state, args=args)
     x_t = ttnn.from_torch(x, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device)
     out = ttnn.to_torch(moe.forward(x_t, mode=mode))[0, 0].float()  # [S, dim]
 

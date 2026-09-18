@@ -18,7 +18,7 @@ use the bespoke single-device fixture from conftest.
 
 Run:
   HF_MODEL=Qwen/Qwen3.5-9B \
-  pytest models/demos/blackhole/qwen36/tests/unit/test_model.py -v -s
+  pytest models/demos/qwen38/tests/unit/test_model.py -v -s
 """
 import os
 
@@ -27,8 +27,8 @@ import torch
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tt.generator_interface import pack_rope_host, prime_decode_trace, unpack_rope
-from models.demos.blackhole.qwen36.tt.model import Qwen36Model
+from models.demos.qwen38.tt.generator_interface import pack_rope_host, prime_decode_trace, unpack_rope
+from models.demos.qwen38.tt.model import Qwen38Model
 from models.tt_transformers.tt.generator import Generator
 
 # Single-device test: default to the 9B checkpoint (the 27B needs a multi-device mesh for TP).
@@ -42,7 +42,7 @@ DECODE_POSITIONS = range(16, 20)  # 4 incremental decode steps
 
 
 def _build(device, n_layers=4):
-    return Qwen36Model.from_pretrained(device, max_batch_size=1, max_seq_len=2048, n_layers=n_layers)
+    return Qwen38Model.from_pretrained(device, max_batch_size=1, max_seq_len=2048, n_layers=n_layers)
 
 
 def _allocate(model):
@@ -157,7 +157,7 @@ def test_chunk_seq_flag_selects_chunk_outer(device):
     use_chunk_seq_prefill (always True now that chunk-seq is the only prefill path). Guards the
     demo gate _should_use_chunked_trace against regressing to the slow whole-sequence trace.
     """
-    from models.demos.blackhole.qwen36.demo.text_demo import _should_use_chunked_trace
+    from models.demos.qwen38.demo.text_demo import _should_use_chunked_trace
 
     model = _build(device)  # n_layers=4
     gdn = [layer.attention for layer in model.layers if not layer.is_full_attention]

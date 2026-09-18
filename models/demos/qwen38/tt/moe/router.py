@@ -13,10 +13,10 @@ routing precision.
 import torch
 
 import ttnn
-from models.demos.blackhole.qwen36.tt import tp_common as tpc
+from models.demos.qwen38.tt import tp_common as tpc
 
 
-class Qwen36Router:
+class Qwen38Router:
     def __init__(self, mesh_device, config, state_dict, tensor_cache_path=None, dtype=ttnn.bfloat16):
         self.num_experts = config.num_experts
         self.top_k = config.top_k

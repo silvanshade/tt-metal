@@ -12,7 +12,7 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import run_for_blackhole
-from models.demos.blackhole.qwen36.tests.test_factory import compute_pcc, get_pcc_threshold
+from models.demos.qwen38.tests.test_factory import compute_pcc, get_pcc_threshold
 
 from .conftest import DEVICE_PARAMS
 
@@ -22,7 +22,7 @@ pytestmark = [run_for_blackhole(), pytest.mark.parametrize("device_params", DEVI
 def test_gated_attention_pcc(device, setup, request):
     """Compare TTNN gated attention against the torch reference for layer 3."""
     args, sd, raw = setup
-    from models.demos.blackhole.qwen36.tt.rope import Qwen36RoPESetup, compute_rope_freqs
+    from models.demos.qwen38.tt.rope import Qwen38RoPESetup, compute_rope_freqs
     from models.experimental.gated_attention_gated_deltanet.torch_functional.gated_attention import (
         gated_attention_forward,
     )
@@ -64,12 +64,12 @@ def test_gated_attention_pcc(device, setup, request):
     )
 
     # TTNN
-    from models.demos.blackhole.qwen36.tt.attention import AttentionConfig, Qwen36GatedAttention
-    from models.demos.blackhole.qwen36.utils.substate import substate
+    from models.demos.qwen38.tt.attention import AttentionConfig, Qwen38GatedAttention
+    from models.demos.qwen38.utils.substate import substate
 
     attn_state = substate(sd, f"layers.{layer_num}.self_attn")
-    attn = Qwen36GatedAttention(device, AttentionConfig.from_args(args), attn_state)
-    rope = Qwen36RoPESetup(device, args)
+    attn = Qwen38GatedAttention(device, AttentionConfig.from_args(args), attn_state)
+    rope = Qwen38RoPESetup(device, args)
     pos = torch.arange(T).unsqueeze(0)
     cos_ttnn, sin_ttnn = rope.get_rot_mats(pos)
 

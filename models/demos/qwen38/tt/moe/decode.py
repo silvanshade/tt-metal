@@ -5,7 +5,7 @@
 Mirrors the gemma4 experts decode path with two Qwen changes: SwiGLU (not GeGLU),
 and the row-parallel down_proj is combined with the qwen tt_all_reduce, which on the
 (1,4) mesh REDUCE-SCATTERS along dim=3 — leaving the output fractured along the hidden
-dim, exactly like Qwen36MLP._forward_tp, so the layer's residual add + DistributedNorm
+dim, exactly like Qwen38MLP._forward_tp, so the layer's residual add + DistributedNorm
 stay aligned. sparse_matmul output is 6D: [batch_dims..., num_experts, seq_tiles, n].
 """
 
@@ -151,7 +151,7 @@ def decode_forward(
     )
 
     # Row-parallel down_proj partials -> reduce-scatter (fractured along hidden dim=3),
-    # matching Qwen36MLP._forward_tp so residual/DistributedNorm alignment holds.
+    # matching Qwen38MLP._forward_tp so residual/DistributedNorm alignment holds.
     if num_devices > 1:
         next_states = tt_all_reduce(
             next_states,

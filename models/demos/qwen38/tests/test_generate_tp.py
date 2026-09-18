@@ -13,13 +13,13 @@ test_model_tp.py (which proves the contract/paged/traced path matches this oracl
 per-step). This test anchors that oracle to a real expected answer on the full model.
 
 Run:
-    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.6-27B \
-      pytest models/demos/blackhole/qwen36/tests/test_generate_tp.py -v -s
+    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.8-27B \
+      pytest models/demos/qwen38/tests/test_generate_tp.py -v -s
 """
 import os
 
-from models.demos.blackhole.qwen36.tests.test_factory import model_path, parametrize_mesh_tp
-from models.demos.blackhole.qwen36.tt.model import Qwen36Model
+from models.demos.qwen38.tests.test_factory import model_path, parametrize_mesh_tp
+from models.demos.qwen38.tt.model import Qwen38Model
 
 
 @parametrize_mesh_tp()
@@ -27,7 +27,7 @@ def test_generate_tp_stateful(mesh_device, ensure_gc):
     from loguru import logger
 
     os.environ.setdefault("HF_MODEL", model_path())
-    model = Qwen36Model.from_pretrained(mesh_device, max_batch_size=1, max_seq_len=256)
+    model = Qwen38Model.from_pretrained(mesh_device, max_batch_size=1, max_seq_len=256)
 
     from transformers import AutoTokenizer
 

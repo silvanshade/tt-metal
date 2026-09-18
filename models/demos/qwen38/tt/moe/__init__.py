@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Sparse Mixture-of-Experts block on Blackhole.
 
-Replaces the dense SwiGLU ``Qwen36MLP`` on MoE layers. Gemma4-style: a dense-routing
+Replaces the dense SwiGLU ``Qwen38MLP`` on MoE layers. Gemma4-style: a dense-routing
 router feeds ``sparse_matmul`` experts (expert-parallel: the experts are sharded across
 the mesh, each device holding its experts at the full intermediate width), reduce-scattered
 after down_proj so the output matches the fractured hidden layout the dense MLP produces
 (see ``tt/mlp.py``). An optional gated shared expert is added when the checkpoint has one.
 """
 
-from models.demos.blackhole.qwen36.tt.moe.config import MoEConfig
-from models.demos.blackhole.qwen36.tt.moe.moe import Qwen36MoE
+from models.demos.qwen38.tt.moe.config import MoEConfig
+from models.demos.qwen38.tt.moe.moe import Qwen38MoE
 
-__all__ = ["MoEConfig", "Qwen36MoE"]
+__all__ = ["MoEConfig", "Qwen38MoE"]

@@ -14,19 +14,19 @@ from safetensors import safe_open
 
 import ttnn
 from models.common.rmsnorm import RMSNorm
-from models.demos.blackhole.qwen36.tt import tp_common as tpc
-from models.demos.blackhole.qwen36.tt.attention.tp import TPAttention
-from models.demos.blackhole.qwen36.tt.gdn.tp import TPGatedDeltaNet
-from models.demos.blackhole.qwen36.tt.gdn.verification import GDNVerification
-from models.demos.blackhole.qwen36.tt.layer import Qwen36DecoderLayer
+from models.demos.qwen38.tt import tp_common as tpc
+from models.demos.qwen38.tt.attention.tp import TPAttention
+from models.demos.qwen38.tt.gdn.tp import TPGatedDeltaNet
+from models.demos.qwen38.tt.gdn.verification import GDNVerification
+from models.demos.qwen38.tt.layer import Qwen38DecoderLayer
 from models.tt_transformers.tt.common import Mode
 from models.tt_transformers.tt.distributed_norm import DistributedNorm
 
 if TYPE_CHECKING:
-    from models.demos.blackhole.qwen36.tt.model import Qwen36Model
+    from models.demos.qwen38.tt.model import Qwen38Model
 
 
-class Qwen36MTP:
+class Qwen38MTP:
     """Predict from a token and the preceding final-normalized hidden state.
 
     # Specification
@@ -43,7 +43,7 @@ class Qwen36MTP:
 
     def __init__(
         self,
-        target: "Qwen36Model",
+        target: "Qwen38Model",
         state_dict: dict[str, torch.Tensor],
         cache_path: Path,
         *,
@@ -79,7 +79,7 @@ class Qwen36MTP:
             ttnn.DRAM_MEMORY_CONFIG,
             cache_path / "fc.column",
         )
-        self.layer = Qwen36DecoderLayer(
+        self.layer = Qwen38DecoderLayer(
             target.mesh_device,
             self.args,
             state_dict,
@@ -97,7 +97,7 @@ class Qwen36MTP:
         self._proposal_outputs: tuple[ttnn.Tensor, ttnn.Tensor] | None = None
         self._proposal_trace: ttnn.MeshTraceId | None = None
         self._kv_caches: tuple[ttnn.Tensor, ...] = ()
-        self.verifier: Qwen36MTPVerifier | None = None
+        self.verifier: Qwen38MTPVerifier | None = None
 
     def allocate_kv_caches(self, kv_cache_shape: tuple[int, ...]) -> None:
         """Allocate independent BFP8 draft KV and target verification tapes.
@@ -122,7 +122,7 @@ class Qwen36MTP:
             for _ in range(2)
         )
         attention.set_paged_kv_cache(*self._kv_caches)
-        self.verifier = Qwen36MTPVerifier(self.target, self.max_verify_tokens)
+        self.verifier = Qwen38MTPVerifier(self.target, self.max_verify_tokens)
         initial_hidden = ttnn.from_torch(
             torch.zeros((1, 1, 1, self.target.args.dim), dtype=torch.bfloat16),
             dtype=ttnn.bfloat16,
@@ -208,7 +208,7 @@ class Qwen36MTP:
         return norm
 
     @classmethod
-    def from_pretrained(cls, target: "Qwen36Model", checkpoint: Path, *, max_verify_tokens: int = 32) -> "Qwen36MTP":
+    def from_pretrained(cls, target: "Qwen38Model", checkpoint: Path, *, max_verify_tokens: int = 32) -> "Qwen38MTP":
         """Read only MTP checkpoint tensors and share the loaded target.
 
         # Specification
@@ -541,7 +541,7 @@ class Qwen36MTP:
                 ttnn.copy(hidden, previous)
 
 
-class Qwen36MTPVerifier:
+class Qwen38MTPVerifier:
     """Verify one sequence against target layers without committing rejected GDN state.
 
     requires: target paged caches and stable GDN state allocated before construction;
@@ -552,7 +552,7 @@ class Qwen36MTPVerifier:
         rejected suffix differs from subsequent real input.
     """
 
-    def __init__(self, target: "Qwen36Model", max_tokens: int) -> None:
+    def __init__(self, target: "Qwen38Model", max_tokens: int) -> None:
         """Allocate every GDN checkpoint and tape before target trace capture."""
         assert target.tp_path and 1 <= max_tokens <= 32
         self.target = target

@@ -1,8 +1,8 @@
-# Qwen3.5 / Qwen3.6 on Blackhole
+# Qwen3.5 / Qwen3.6 / Qwen3.8 on Blackhole
 
 This directory implements Tenstorrent Blackhole inference for the hybrid
-**Gated DeltaNet + Gated Full Attention** Qwen3.5/3.6 family. A single code
-path serves four checkpoints:
+**Gated DeltaNet + Gated Full Attention** Qwen3.5/3.6/3.8 family. A single code
+path supports the checkpoints below:
 
 | Model            | `HF_MODEL`             | Mesh / `MESH_DEVICE` | Parallelism            |
 | ---------------- | ---------------------- | -------------------- | ---------------------- |
@@ -11,21 +11,23 @@ path serves four checkpoints:
 | Qwen3.6-27B      | `Qwen/Qwen3.6-27B`     | P150x4 — `P150x4`    | 4-way tensor parallel  |
 | Qwen3.6-27B      | `Qwen/Qwen3.6-27B`     | P150x8 — `P150x8`    | 8-way tensor parallel  |
 | Qwen3.6-35B-A3B  | `Qwen/Qwen3.6-35B-A3B` | P150x4 — `P150x4`    | 4-way TP + sparse MoE  |
+| Qwen3.8-27B      | `Qwen/Qwen3.8-27B`     | P150x4 — `P150x4`    | 4-way tensor parallel  |
+| Qwen3.8-27B      | `Qwen/Qwen3.8-27B`     | P150x8 — `P150x8`    | 8-way tensor parallel  |
 
 The **35B-A3B** is the sparse Mixture-of-Experts member of the family (`qwen3_5_moe`:
 256 routed experts, top-8, plus a gated shared expert on every layer). Every layer's
-dense SwiGLU MLP is replaced by the sparse MoE block in `tt/moe/`; dispatch is
-config-driven (`args.is_moe_layer`), so on the dense 9B/27B `num_experts == 0` and the
+dense SwiGLU MLP is replaced by the sparse MoE block in `tt/moe/`. On the dense
+9B/27B, `args.is_moe_layer` is false (`num_experts == 0`), so the
 dense MLP path is byte-for-byte unchanged.
 
 - The **9B** runs on a **single Blackhole P150** device. It uses the validated
   single-device forward path (no collectives).
-- The **27B** variants (both Qwen3.5-27B and Qwen3.6-27B) run on a **P150x4**
+- The **27B** variants run on a **P150x4**
   (a `(1, 4)` Blackhole mesh) using **4-way tensor parallelism (TP)**. The TP
   path needs `FABRIC_1D` for the cross-device collectives (all-reduce /
   reduce-scatter) and a trace region for the captured chunk-outer prefill trace.
-- **Qwen3.6-27B additionally runs at TP=8** on a `(1, 8)` mesh (`P150x8`).
-  Because it has only **4 KV heads**, TP=8 cannot give each device its own head:
+- **Qwen3.6-27B and Qwen3.8-27B additionally run at TP=8** on a `(1, 8)` mesh (`P150x8`).
+  Because Qwen3.8-27B has only **4 KV heads**, TP=8 cannot give each device its own head:
   each head is instead **replicated across the device pair holding its GQA query
   group** (devices 0-1 share KV head 0, 2-3 head 1, and so on), so
   `n_local_kv_heads` is 1 at both TP=4 and TP=8 and the whole runtime KV path is
@@ -40,7 +42,7 @@ the single code base adapts to each checkpoint. The device count alone
 
 ## Architecture
 
-Assembly: `tok_embeddings → N × Qwen36DecoderLayer → RMSNorm → LM Head`.
+Assembly: `tok_embeddings → N × Qwen38DecoderLayer → RMSNorm → LM Head`.
 
 Each model interleaves two attention block types (read from the HF
 `layer_types`): **Gated DeltaNet** (linear-attention, recurrent + causal conv
@@ -63,8 +65,8 @@ export MESH_DEVICE=P150
 **27B (P150x4):**
 
 ```bash
-# Qwen3.6-27B
-export HF_MODEL=Qwen/Qwen3.6-27B
+# Qwen3.8-27B
+export HF_MODEL=Qwen/Qwen3.8-27B
 export MESH_DEVICE=P150x4
 
 # …or Qwen3.5-27B
@@ -94,12 +96,12 @@ export QWEN_SDPA_BF8=1
 export QWEN_QK_HADAMARD=0
 ```
 
-`QWEN_QK_HADAMARD` is read once when `Qwen36Model` is constructed (`1` by default). The model shares the selected operation with its attention layers and MTP draft. Disabling it leaves Q and K unchanged without allocating a rotation matrix; V is unchanged in either mode. Restart with fresh KV caches and recapture traces when changing the setting: cached keys and queries must use the same basis. Changing the environment after construction does not change an existing model.
+`QWEN_QK_HADAMARD` is read once when `Qwen38Model` is constructed (`1` by default). The model shares the selected operation with its attention layers and MTP draft. Disabling it leaves Q and K unchanged without allocating a rotation matrix; V is unchanged in either mode. Restart with fresh KV caches and recapture traces when changing the setting: cached keys and queries must use the same basis. Changing the environment after construction does not change an existing model.
 
 
 ## MTP verifier trace lifecycle
 
-`Qwen36MTPVerifier.verify(...)` checkpoints one request, computes target logits and normalized hidden rows, and leaves a pending prefix fold. `fold(accepted_inputs)` commits only accepted input tokens, including the anchor but excluding the correction or bonus token.
+`Qwen38MTPVerifier.verify(...)` checkpoints one request, computes target logits and normalized hidden rows, and leaves a pending prefix fold. `fold(accepted_inputs)` commits only accepted input tokens, including the anchor but excluding the correction or bonus token.
 
 Verification batches target projections across the input block. Each attention layer uses one paged SDPA call with a causal position per row; KV writes remain ordered per row. Each GDN layer batches convolution and gates, then advances the block through one recurrent program with one core per local value head. The compact update tape supports committing any accepted prefix without retaining a recurrent-state snapshot per token.
 
@@ -117,7 +119,7 @@ The captured verifier contains no committed-slot selection, so requests with the
 
 ## Native MTP cache ownership
 
-Native `initialize_vllm_model(..., num_speculative_tokens=K)` loads and attaches MTP before cache allocation, selects the TP modules even for a single request, and bounds verification tapes to `K + 1` inputs (drafts plus anchor). Supported `K` is 1–31 with `tt_data_parallel=1`; zero leaves MTP disabled. Draft loading follows the target's surrounding weight-conversion context. Direct native callers can instead attach `Qwen36MTP.from_pretrained(..., max_verify_tokens=N)` to `model.mtp`; its default bound remains 32.
+Native `initialize_vllm_model(..., num_speculative_tokens=K)` loads and attaches MTP before cache allocation, selects the TP modules even for a single request, and bounds verification tapes to `K + 1` inputs (drafts plus anchor). Supported `K` is 1–31 with `tt_data_parallel=1`; zero leaves MTP disabled. Draft loading follows the target's surrounding weight-conversion context. Direct native callers can instead attach `Qwen38MTP.from_pretrained(..., max_verify_tokens=N)` to `model.mtp`; its default bound remains 32.
 
 The TP allocator creates independent BFP8 draft KV with the same physical page IDs. The target's recurrent-slot remap also transfers owned hidden feedback; paged KV stays in place and follows request page tables. Native prefill warmup compiles the draft observer alongside target chunks and masked buckets. Observer inputs remain allocated per bucket; request-time host uploads reuse them. The serving wrapper owns the captured round lifecycle below; the plugin supplies scheduling and target sampling policy.
 
@@ -127,7 +129,7 @@ Release caller-owned decode, bucket-prefill and verification traces before `mode
 
 ## MTP proposal trace lifecycle
 
-`Qwen36MTP.prepare_proposal(...)` allocates persistent input copies and output destinations before any model trace. It warms the draft forward pass, shared LM projection and buffer copies. `capture_proposal()` captures one step, copies results into the prepared destinations and releases temporary results inside capture. Requests with matching input shapes share that trace.
+`Qwen38MTP.prepare_proposal(...)` allocates persistent input copies and output destinations before any model trace. It warms the draft forward pass, shared LM projection and buffer copies. `capture_proposal()` captures one step, copies results into the prepared destinations and releases temporary results inside capture. Requests with matching input shapes share that trace.
 
 `proposal_step(...)` returns borrowed logits and normalized hidden state, overwritten by the next replay. The preceding borrowed hidden state can feed the next recursive step directly. Caller device buffers must be allocated before capture; update their contents through host-to-device copies. Draft cache positions are absolute token positions minus one, while rotary tensors encode absolute positions.
 
@@ -135,7 +137,7 @@ Warmup and capture write draft KV. Restore request cache contents before inferen
 
 ## Captured MTP rounds
 
-The serving wrapper owns `Qwen36MTPRound`: it allocates frames and warms every count, request slot and finalization path before capturing ordinary decode or speculative traces. Greedy execution first replays target verification and first-mismatch acceptance, then reads one int32 accepted-input count. That count selects a captured finalization path: full acceptance commits verified GDN scratch without recurrent replay; partial acceptance retains finite-precision prefix repair. Both paths perform target-hidden selection, shifted teacher alignment and recursive device-argmax drafting. The final host result contains accepted count, correction token, draft extent and draft IDs; target logits and hidden rows remain on device.
+The serving wrapper owns `Qwen38MTPRound`: it allocates frames and warms every count, request slot and finalization path before capturing ordinary decode or speculative traces. Greedy execution first replays target verification and first-mismatch acceptance, then reads one int32 accepted-input count. That count selects a captured finalization path: full acceptance commits verified GDN scratch without recurrent replay; partial acceptance retains finite-precision prefix repair. Both paths perform target-hidden selection, shifted teacher alignment and recursive device-argmax drafting. The final host result contains accepted count, correction token, draft extent and draft IDs; target logits and hidden rows remain on device.
 
 Target policies that require host sampling use the same verification and finalization traces: verification exports target logits, and finalization consumes the host-selected accepted count and correction token. The caller evaluates target rows only through the first mismatch or stopping boundary. Host-selected full acceptance uses the same scratch-state fast path. Accepted input history and hidden feedback exclude the correction token until its next target pass.
 
@@ -162,14 +164,14 @@ Run the preferred traced cases (the env vars above must already be exported):
 
 ```bash
 # All traced ISLs
-pytest models/demos/blackhole/qwen36/demo/text_demo.py -v -s -k "traced"
+pytest models/demos/qwen38/demo/text_demo.py -v -s -k "traced"
 
 # A single ISL, e.g. the short 128-token traced case
-pytest models/demos/blackhole/qwen36/demo/text_demo.py -v -s -k "traced_128"
+pytest models/demos/qwen38/demo/text_demo.py -v -s -k "traced_128"
 
 # Medium / long traced ISLs
-pytest models/demos/blackhole/qwen36/demo/text_demo.py -v -s -k "traced_4k"
-pytest models/demos/blackhole/qwen36/demo/text_demo.py -v -s -k "traced_64k"
+pytest models/demos/qwen38/demo/text_demo.py -v -s -k "traced_4k"
+pytest models/demos/qwen38/demo/text_demo.py -v -s -k "traced_64k"
 ```
 
 The **same command works for 9B, 27B, and 35B-A3B** — only the exported `HF_MODEL` /
@@ -218,9 +220,9 @@ per-test thresholds.
 Run the 9B unit suite (with `HF_MODEL=Qwen/Qwen3.5-9B`, `MESH_DEVICE=P150`):
 
 ```bash
-pytest models/demos/blackhole/qwen36/tests/unit/ -v -s
-pytest models/demos/blackhole/qwen36/tests/test_prefill.py -v -s
-pytest models/demos/blackhole/qwen36/tests/test_weight_mapping.py -v -s
+pytest models/demos/qwen38/tests/unit/ -v -s
+pytest models/demos/qwen38/tests/test_prefill.py -v -s
+pytest models/demos/qwen38/tests/test_weight_mapping.py -v -s
 ```
 
 > `test_prefill.py` auto-skips cases longer than `--max-prefill` (default 8192).
@@ -242,15 +244,15 @@ checkpoint. They must run on the `(1,4)` mesh with `FABRIC_1D` (the
 | `test_model_tp.py`    | full-model TP contract: paged+traced path matches the bespoke oracle |
 | `test_generate_tp.py` | full-model bespoke `generate_tp` on a real prompt (answer oracle)   |
 
-Run the 27B TP suite (with `HF_MODEL=Qwen/Qwen3.6-27B` or `Qwen/Qwen3.5-27B`,
+Run the 27B TP suite (with `HF_MODEL=Qwen/Qwen3.8-27B` or `Qwen/Qwen3.5-27B`,
 `MESH_DEVICE=P150x4`):
 
 ```bash
-pytest models/demos/blackhole/qwen36/tests/test_mlp_tp.py -v -s
-pytest models/demos/blackhole/qwen36/tests/test_attention_tp.py -v -s
-pytest models/demos/blackhole/qwen36/tests/test_gdn_tp.py -v -s
-pytest models/demos/blackhole/qwen36/tests/test_model_tp.py -svq
-pytest models/demos/blackhole/qwen36/tests/test_generate_tp.py -v -s
+pytest models/demos/qwen38/tests/test_mlp_tp.py -v -s
+pytest models/demos/qwen38/tests/test_attention_tp.py -v -s
+pytest models/demos/qwen38/tests/test_gdn_tp.py -v -s
+pytest models/demos/qwen38/tests/test_model_tp.py -svq
+pytest models/demos/qwen38/tests/test_generate_tp.py -v -s
 ```
 
 > The MoE-specific tests (`test_moe_tp.py`, and the MoE path in `test_model_tp.py` /

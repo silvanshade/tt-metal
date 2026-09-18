@@ -31,7 +31,7 @@ def rope_inv_freq(head_dim: int, theta: float, rope_scaling: dict | None = None)
     if rope_type == "default":
         return 1.0 / pos_freqs, 1.0
     if rope_type != "yarn":
-        raise ValueError(f"unsupported rope_type {rope_type!r}; Qwen3.6 supports 'default' and 'yarn'")
+        raise ValueError(f"unsupported rope_type {rope_type!r}; Qwen3.8 supports 'default' and 'yarn'")
 
     factor = float(rope_scaling["factor"])
     original_max = int(rope_scaling["original_max_position_embeddings"])
@@ -83,11 +83,11 @@ def compute_rope_freqs(head_dim: int, max_seq_len: int, theta: float = 10_000_00
     return cos, sin
 
 
-class Qwen36RoPESetup:
+class Qwen38RoPESetup:
     """Precomputes and stores RoPE cos/sin tensors for Qwen3.5.
 
     Usage:
-        rope = Qwen36RoPESetup(device, args)
+        rope = Qwen38RoPESetup(device, args)
         cos, sin = rope.get_rot_mats(position_ids)
     """
 
@@ -209,7 +209,7 @@ class Qwen36RoPESetup:
         placeholders located via the token ids, so the caller need not pass mm_token_type_ids)
         and the grid(s), builds a SEQUENCE-indexed cos/sin table via interleaved M-RoPE, and
         stores mrope_position_delta. Returns rope_delta (int)."""
-        from models.demos.blackhole.qwen36.tt.attention.rope_tp import get_rope_index, get_rot_mats
+        from models.demos.qwen38.tt.attention.rope_tp import get_rope_index, get_rot_mats
 
         if image_grid_thw is None and video_grid_thw is None:
             self._req_cos = None

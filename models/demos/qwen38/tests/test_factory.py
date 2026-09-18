@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared test helpers for the Qwen3.5/Qwen3.6 demo test suite.
+"""Shared test helpers for the Qwen3.5/Qwen3.8 demo test suite.
 
 Centralizes what used to be copy-pasted across the per-test files:
 
@@ -14,7 +14,7 @@ Centralizes what used to be copy-pasted across the per-test files:
 * ``parametrize_mesh_tp()``        — the env-driven (1,8)/(1,4)/(1,1) mesh + FABRIC_1D idiom
 * ``tp_composer`` / ``replicate_to_device`` — shared TP tensor helpers
 
-Heavy imports (ttnn weight loaders, ``Qwen36ModelArgs``) are kept lazy / local so
+Heavy imports (ttnn weight loaders, ``Qwen38ModelArgs``) are kept lazy / local so
 pure-CPU tests (``test_weight_mapping``, ``test_substate``) stay fast at collection.
 """
 
@@ -29,7 +29,7 @@ import torch
 import ttnn
 
 # TP tests default to the 27B variant; single-device unit tests setdefault 9B.
-_DEFAULT_HF_MODEL = "Qwen/Qwen3.6-27B"
+_DEFAULT_HF_MODEL = "Qwen/Qwen3.8-27B"
 _PCC_THRESHOLDS_PATH = os.path.join(os.path.dirname(__file__), "pcc_thresholds.json")
 
 # Prefill length buckets gated by --max-prefill (see conftest). Lengths above the
@@ -120,7 +120,7 @@ def load_mlp_layer(ckpt_dir, layer_idx):
 def load_moe_layer(ckpt_dir, layer_idx):
     """Qwen3.5-MoE layer weights — router + fused experts + gated shared expert.
 
-    Output keys match exactly the ``layers.<i>.mlp`` substate Qwen36MoE consumes:
+    Output keys match exactly the ``layers.<i>.mlp`` substate Qwen38MoE consumes:
       ``gate.weight`` (router), ``experts.gate_up_proj`` / ``experts.down_proj``
       (fused 3D nn.Parameters — no ``.weight`` suffix), ``shared_expert.{gate,up,down}_proj.weight``,
       ``shared_expert_gate.weight``.
@@ -272,7 +272,7 @@ def parametrize_mesh_tp(max_tp=8):
     """
     shape = _resolve_mesh_shape(max_tp)
     # Local import to keep this test helper's module load light (see module docstring).
-    from models.demos.blackhole.qwen36.tt.model_config import GDN_CONV1D_L1_SMALL_SIZE
+    from models.demos.qwen38.tt.model_config import GDN_CONV1D_L1_SMALL_SIZE
 
     def decorator(fn):
         fn = pytest.mark.parametrize(

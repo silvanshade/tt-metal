@@ -1,25 +1,25 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Sparse MoE MLP block. Drop-in replacement for Qwen36MLP on MoE layers:
+"""Sparse MoE MLP block. Drop-in replacement for Qwen38MLP on MoE layers:
 forward(x) takes a single (ffn-normed, full-hidden) tensor and returns the same
 fractured-hidden layout the dense MLP produces.
 """
 
 import ttnn
-from models.demos.blackhole.qwen36.tt.moe.experts import Qwen36Experts
-from models.demos.blackhole.qwen36.tt.moe.router import Qwen36Router
-from models.demos.blackhole.qwen36.tt.moe.shared import Qwen36SharedExpert
-from models.demos.blackhole.qwen36.utils.substate import substate
+from models.demos.qwen38.tt.moe.experts import Qwen38Experts
+from models.demos.qwen38.tt.moe.router import Qwen38Router
+from models.demos.qwen38.tt.moe.shared import Qwen38SharedExpert
+from models.demos.qwen38.utils.substate import substate
 
 
-class Qwen36MoE:
+class Qwen38MoE:
     def __init__(self, mesh_device, config, state_dict, tensor_cache_path=None, args=None, tt_ccl=None):
         self.config = config
         num_devices = getattr(args, "num_devices", 1) if args is not None else 1
         topology = args.ccl_topology() if (args is not None and num_devices > 1) else None
 
-        self.router = Qwen36Router(mesh_device, config, substate(state_dict, "gate"), tensor_cache_path)
-        self.experts = Qwen36Experts(
+        self.router = Qwen38Router(mesh_device, config, substate(state_dict, "gate"), tensor_cache_path)
+        self.experts = Qwen38Experts(
             mesh_device,
             config,
             substate(state_dict, "experts"),
@@ -29,7 +29,7 @@ class Qwen36MoE:
         )
         self.shared = None
         if config.shared_intermediate_size:
-            self.shared = Qwen36SharedExpert(mesh_device, state_dict, tensor_cache_path, args=args, tt_ccl=tt_ccl)
+            self.shared = Qwen38SharedExpert(mesh_device, state_dict, tensor_cache_path, args=args, tt_ccl=tt_ccl)
 
     def forward(self, x, mode="decode"):
         dense_routing = self.router(x)

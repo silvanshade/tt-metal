@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Partial-RoPE PCC for the Qwen3.6-27B full-attention layer, TP path.
+"""Partial-RoPE PCC for the Qwen3.8-27B full-attention layer, TP path.
 
 Two tests (prefill / decode), same shape as the GDN suite: the **torch implementation
 of the model** is the reference and the **exact rope path the text demo drives** is the
 TTNN device-under-test.
 
-Qwen3.6 uses PARTIAL rotary (partial_rotary_factor=0.25): only the first
+Qwen3.8 uses PARTIAL rotary (partial_rotary_factor=0.25): only the first
 ``rope_head_dim = head_dim * 0.25`` dims of each head are rotated (HF split-halves
 format); the remaining dims pass through unchanged.
 
@@ -17,8 +17,8 @@ format); the remaining dims pass through unchanged.
   demo's TPAttention calls at ``attention/tp.py:155-156`` prefill / ``:236-237`` decode).
 
 Run:
-    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.6-27B \
-      pytest models/demos/blackhole/qwen36/tests/test_rope_tp.py -v -s
+    MESH_DEVICE=P150x4 HF_MODEL=Qwen/Qwen3.8-27B \
+      pytest models/demos/qwen38/tests/test_rope_tp.py -v -s
 """
 import os
 
@@ -27,19 +27,19 @@ from loguru import logger
 
 import ttnn
 from models.common.utility_functions import comp_pcc
-from models.demos.blackhole.qwen36.tests.test_factory import (
+from models.demos.qwen38.tests.test_factory import (
     get_pcc_threshold,
     model_path,
     parametrize_mesh_tp,
     replicate_to_device,
 )
-from models.demos.blackhole.qwen36.tt.attention.rope_tp import (
+from models.demos.qwen38.tt.attention.rope_tp import (
     apply_partial_rope_decode,
     apply_partial_rope_prefill,
     rot_mats_decode,
     rot_mats_prefill,
 )
-from models.demos.blackhole.qwen36.tt.model_config import Qwen36ModelArgs
+from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 
 
 def _cos_sin(positions, rope_dim, theta):
@@ -58,7 +58,7 @@ def _read0(mesh_device, x):
 
 def _rope_params(mesh_device, B):
     os.environ.setdefault("HF_MODEL", model_path())
-    args = Qwen36ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
+    args = Qwen38ModelArgs(mesh_device, max_batch_size=B, max_seq_len=256)
     HD = args.head_dim
     rope_dim = args.rope_head_dim
     theta = args.rope_theta

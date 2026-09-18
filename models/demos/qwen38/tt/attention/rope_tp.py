@@ -12,7 +12,7 @@ import itertools
 import torch
 
 import ttnn
-from models.demos.blackhole.qwen36.tt.rope import rope_inv_freq
+from models.demos.qwen38.tt.rope import rope_inv_freq
 
 
 def build_rope_tables(device, rope_dim, max_seq_len, theta):
@@ -312,7 +312,7 @@ def apply_partial_rope_decode(x, cos_tt, sin_tt, n_heads, batch_size, rope_dim):
     """x: [1, B, n_heads, HD]; cos/sin: [1, B, 1, rope_dim]; rotates first rope_dim dims.
 
     Fused HF-convention rotate-half via ttnn.experimental.rotary_embedding_hf. The op's native
-    decode mode (is_decode_mode=True) hard-requires HEIGHT_SHARDED input + cos/sin, but qwen36's
+    decode mode (is_decode_mode=True) hard-requires HEIGHT_SHARDED input + cos/sin, but qwen38's
     decode attention runs interleaved (q/k are sharded_to_interleaved right after head-split). To
     avoid the reshards that sharding would add, transpose the interleaved tensor to a prefill-shaped
     [1, n_heads, B, rope_dim] (batch plays the seq role) and use the interleaved-friendly prefill

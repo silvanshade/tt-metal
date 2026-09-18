@@ -23,13 +23,13 @@ counter.
 
 Run:
 
-    pytest models/demos/blackhole/qwen36/tests/test_decode_matmul_layout_sweep.py -p no:cacheprovider
+    pytest models/demos/qwen38/tests/test_decode_matmul_layout_sweep.py -p no:cacheprovider
 
 Environment:
 
-* ``QWEN36_SWEEP_OUT`` — directory for the CSV rows (default: no CSV, table logged only).
-* ``QWEN36_SWEEP_ITERS`` — measured iterations per cell (default 40, minimum 30).
-* ``QWEN36_SWEEP_SHAPES`` — comma-separated shape labels to restrict the sweep.
+* ``QWEN38_SWEEP_OUT`` — directory for the CSV rows (default: no CSV, table logged only).
+* ``QWEN38_SWEEP_ITERS`` — measured iterations per cell (default 40, minimum 30).
+* ``QWEN38_SWEEP_SHAPES`` — comma-separated shape labels to restrict the sweep.
 """
 
 import csv
@@ -48,7 +48,7 @@ import torch
 from loguru import logger
 
 import ttnn
-from models.demos.blackhole.qwen36.tt import tp_common as tpc
+from models.demos.qwen38.tt import tp_common as tpc
 
 TILE = tpc.TILE_SIZE
 DRAM_BANKS = tpc.DRAM_CORES
@@ -210,10 +210,10 @@ def weight_bytes(k, n):
 
 def run_sweep(mesh_device):
     """Sweep both decode weight layouts over the served shapes; returns one row per cell."""
-    iters = max(MIN_ITERS, int(os.environ.get("QWEN36_SWEEP_ITERS", "40")))
-    wanted = os.environ.get("QWEN36_SWEEP_SHAPES")
+    iters = max(MIN_ITERS, int(os.environ.get("QWEN38_SWEEP_ITERS", "40")))
+    wanted = os.environ.get("QWEN38_SWEEP_SHAPES")
     selected = set(wanted.split(",")) if wanted else None
-    out_dir = os.environ.get("QWEN36_SWEEP_OUT")
+    out_dir = os.environ.get("QWEN38_SWEEP_OUT")
 
     timer = ProgramTimer()
     timer.register()

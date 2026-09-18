@@ -6,6 +6,7 @@
 27B TP (1,4 mesh): w1/w3 column-parallel, w2 row-parallel; tt_all_reduce
 reduce-scatters on meshes with a dim-1 shape (e.g. P150x4), fracturing hidden.
 """
+
 import os
 from dataclasses import dataclass
 
@@ -63,7 +64,7 @@ def load_mlp_weights(mesh_device, state_dict, tensor_cache_path=None, args=None,
     if tp > 1 or dram_sharded:
         # TP: w1/w3 column-parallel (shard out dim), w2 row-parallel (shard in dim).
         # At TP=1 the mesh split is a no-op and this branch exists for the DRAM-sharded layout.
-        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+        from models.demos.qwen38.tt import tp_common as tpc
 
         def cache(name, tag=""):
             return str(tensor_cache_path / f"mlp.{name}.weight{tag}.tp") if tensor_cache_path else None
@@ -158,7 +159,7 @@ def load_mlp_weights(mesh_device, state_dict, tensor_cache_path=None, args=None,
     )
 
 
-class Qwen36MLP:
+class Qwen38MLP:
     """SwiGLU feed-forward network for Qwen3.5."""
 
     def __init__(self, mesh_device, state_dict, tensor_cache_path=None, args=None, tt_ccl=None, use_gateup_agmm=True):
@@ -173,7 +174,7 @@ class Qwen36MLP:
             args is not None and getattr(args, "mlp_w1_weight_memcfg", None) is not None and not self._mlp_1d_decode
         )
         # Prefill fused-swiglu AGMM (ff_norm skips its AG; layer.py sets _fuse_ff_agmm to match).
-        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+        from models.demos.qwen38.tt import tp_common as tpc
 
         self._fuse_gateup_agmm = tpc.mlp_gateup_agmm_enabled(self.num_devices) and use_gateup_agmm
         self.weights = load_mlp_weights(
@@ -191,7 +192,7 @@ class Qwen36MLP:
         )
 
     def forward(self, x, mode=None):
-        # mode is accepted for the same interface as Qwen36MoE; the dense MLP does not use it.
+        # mode is accepted for the same interface as Qwen38MoE; the dense MLP does not use it.
         # Sharded-module activations use the TP path even on a (1,1) mesh, where the reduce
         # is a no-op. The single-device 3D input keeps the ordinary path.
         if getattr(self.args, "tp_path", self.num_devices > 1):
@@ -218,7 +219,7 @@ class Qwen36MLP:
 
     def _forward_tp(self, x):
         """TP forward: replicated input; reduce-scatter output fractured on hidden dim."""
-        from models.demos.blackhole.qwen36.tt import tp_common as tpc
+        from models.demos.qwen38.tt import tp_common as tpc
         from models.tt_transformers.tt.ccl import tt_all_reduce
 
         w = self.weights
