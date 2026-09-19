@@ -214,8 +214,7 @@ class TPGatedDeltaNet:
         self.value_dim_tp = args.gdn_value_dim_tp
         # Flat q/k/v into adapter (skips prefill head-split reshapes)
         self._gdn_flat_qkv = True
-        # Fuse adapter output relayout with rms_norm + head-flatten (set with _prefill_fits_l1 below).
-        self._gdn_fuse_out = True
+        # Prefill keeps native output head-major; tensor residency is decided below.
         self.K = args.gdn_conv_kernel_size
         self.scale = self.Dk**-0.5
         self.cfg = tpc.COMPUTE_HIFI2
@@ -250,8 +249,7 @@ class TPGatedDeltaNet:
         # Full-width TP=1 prefill exceeds the worker L1 budget, while the fractured TP>=2
         # activations fit. This also determines projection and norm/relayout placement.
         self._prefill_fits_l1 = (2048 + self.K - 1) * self.qkv_dim_tp * 2 // 33 <= 800_000
-        # At full width the nlp_concat_heads static buffers exceed L1 on their own.
-        self._gdn_fuse_out = self._gdn_fuse_out and self._prefill_fits_l1
+        # Head concatenation has bounded staging and does not require its tensors to reside in L1.
         self._conv1d_wprep = None  # prepared depthwise weight (populated on first prefill call)
         # Persistent zero sources for trace-safe reset_state_inplace (alloc before any trace)
         self._zero_conv0 = None
@@ -616,7 +614,7 @@ class TPGatedDeltaNet:
             cached_masks=self.chunk_seq_masks,
             valid_len=valid_len,
             qkv_head_dims=_qkv_head_dims,
-            return_o_bh=self._gdn_fuse_out,
+            return_o_bh=True,
             **_extra,
         )
         B, D = 1, self.qkv_dim_tp
@@ -660,21 +658,14 @@ class TPGatedDeltaNet:
         # Gated RMSNorm + SiLU(z); norm/flatten in L1, gated output in DRAM for out-proj. At TP=1
         # the [Nv, T, Dv] output (12 MB at Nv=48) does not fit L1 beside the relayout's CBs: DRAM.
         _L1 = ttnn.L1_MEMORY_CONFIG if self._prefill_fits_l1 else ttnn.DRAM_MEMORY_CONFIG
-        if self._gdn_fuse_out:
-            # Fuse adapter relayout with per-head rms_norm + head-flatten.
-            # TILE-native head->token relayout (transpose + fold), dropping the
-            # TILE->ROW_MAJOR->TILE round-trip. o is head-major (1,Nv,T,Dv).
-            n = ttnn.rms_norm(o, weight=tw["norm_w"], epsilon=1e-6, memory_config=_L1)
-            ttnn.deallocate(o)
-            n = ttnn.reshape(n, (1, Nv, T, Dv))
-            # Fused head->token relayout: [1,Nv,T,Dv] -> [1,1,T,Nv*Dv].
-            n = ttnn.experimental.nlp_concat_heads(n, memory_config=_L1)
-            out_f = ttnn.reshape(n, (1, T, self.value_dim_tp))
-        else:
-            out_n = ttnn.rms_norm(o, weight=tw["norm_w"], epsilon=1e-6, memory_config=_L1)
-            ttnn.deallocate(o)
-            out_f = ttnn.reshape(out_n, (1, T, self.value_dim_tp), memory_config=_L1)
-            ttnn.deallocate(out_n)
+        # Keep per-head normalization in the native head-major representation.
+        # Bounded concat staging is independent of head count; tensor placement stays unchanged.
+        n = ttnn.rms_norm(o, weight=tw["norm_w"], epsilon=1e-6, memory_config=_L1)
+        ttnn.deallocate(o)
+        n = ttnn.reshape(n, (1, Nv, T, Dv))
+        flat = ttnn.experimental.nlp_concat_heads(n, memory_config=_L1)
+        ttnn.deallocate(n)
+        out_f = ttnn.reshape(flat, (1, T, self.value_dim_tp))
         if self._out_colpar_prefill:
             # Column-parallel out-proj: the gate multiply emits the AGMM input directly as bf16 (the
             # only numerics change vs the fp32 MMRS arm: activation quantized to bf16 before the
