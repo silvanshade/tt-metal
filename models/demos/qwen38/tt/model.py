@@ -1988,12 +1988,13 @@ class Qwen38Model:
     # Diverges from get_padded_prefill_len: 256/512 for short TTFT; GDN needs exact valid_len mask.
     _PREFILL_MASK_BUCKETS = (128, 256, 512, 1024, 2048)
 
-    @classmethod
-    def _mask_bucket_for(cls, length):
-        """Smallest fixed bucket >= length (falls back to the next 128-multiple)."""
-        for b in cls._PREFILL_MASK_BUCKETS:
+    def _mask_bucket_for(self, length):
+        """Smallest warmed bucket, including a larger configured outer chunk."""
+        for b in self._PREFILL_MASK_BUCKETS:
             if length <= b:
                 return b
+        if self._chunked_chunk_size is not None and length <= self._chunked_chunk_size:
+            return self._chunked_chunk_size
         return ((length + 127) // 128) * 128
 
     def _forward_prefill_chunk_masked(
@@ -2242,6 +2243,10 @@ class Qwen38Model:
         calls this just before begin_trace_capture). page_table must cover the largest bucket."""
         if buckets is None:
             buckets = self._PREFILL_MASK_BUCKETS
+            # Longer outer chunks introduce a larger possible tail. Warm that same
+            # ceiling bucket (including fill widths), never arbitrary request lengths.
+            if self._chunked_chunk_size is not None and self._chunked_chunk_size > buckets[-1]:
+                buckets = (*buckets, self._chunked_chunk_size)
         block_size = get_block_size(self._paged_kv_caches)
 
         # Bucket-keyed programs: one masked + one no-mask forward per bucket.
@@ -2311,7 +2316,7 @@ class Qwen38Model:
             ttnn.deallocate(k_full)
 
     def prefill_traced_chunked(self, token_ids, page_table, actual_len, vision_tokens=None):
-        """Prefill by replaying the captured per-chunk trace for each FULL 2048-token chunk,
+        """Prefill by replaying the captured trace for each configured full chunk,
         then processing the final partial chunk eagerly with minimal padding.
 
         Only the real prompt (token_ids[:, :actual_len]) is processed; any bucket padding in
