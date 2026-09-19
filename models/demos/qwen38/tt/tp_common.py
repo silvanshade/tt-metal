@@ -370,13 +370,15 @@ def prefill_matmul_sharded_weight(x, weight, compute_cfg, k, fused_activation=No
     n = weight.shape[-1]
     base = tuning or _PREFILL_TUNING[4]
     grid = prefill_grid_default()
+    # Unlike the direct L1-output path, this blocked path streams its output to DRAM.
+    # On Blackhole, allow eight K tiles to halve input-block synchronization at the
+    # served shapes; the payload check still bounds each candidate's static buffers.
+    block_k_cap = 8 if is_blackhole() else base["in0_block_w_cap"]
     k_tiles = math.ceil(k / TILE_SIZE)
     per_core_m = max(1, math.ceil(seq / TILE_SIZE / grid[1]))
     width_limit = min(max_cols or grid[0], PREFILL_MAX_COLS_PORTABLE, math.ceil(n / TILE_SIZE))
     intermediate_dtype = (
-        ttnn.float32
-        if compute_cfg.fp32_dest_acc_en
-        else (ttnn.bfloat16 if compute_cfg.packer_l1_acc else x.dtype)
+        ttnn.float32 if compute_cfg.fp32_dest_acc_en else (ttnn.bfloat16 if compute_cfg.packer_l1_acc else x.dtype)
     )
     in0_bytes = _PREFILL_TILE_BYTES[x.dtype]
     in1_bytes = _PREFILL_TILE_BYTES[weight.dtype]
@@ -394,7 +396,7 @@ def prefill_matmul_sharded_weight(x, weight, compute_cfg, k, fused_activation=No
             key=lambda w: (_get_out_subblock_w(w, 1), w),
             reverse=True,
         )
-        for block_k in range(min(base["in0_block_w_cap"], k_tiles), 0, -1):
+        for block_k in range(min(block_k_cap, k_tiles), 0, -1):
             if k_tiles % block_k:
                 continue
             buffers = 2 if batch * (k_tiles // block_k) > 1 else 1
@@ -427,7 +429,6 @@ def prefill_matmul_sharded_weight(x, weight, compute_cfg, k, fused_activation=No
                         memory_config=ttnn.DRAM_MEMORY_CONFIG,
                     )
     raise RuntimeError(f"no blocked prefill config fits L1 for sharded weight [{k},{n}]")
-
 
 
 # Mesh tensor helpers
