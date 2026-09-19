@@ -251,6 +251,12 @@ class TPGatedDeltaNet:
         self._prefill_fits_l1 = (2048 + self.K - 1) * self.qkv_dim_tp * 2 // 33 <= 800_000
         # Head concatenation has bounded staging and does not require its tensors to reside in L1.
         self._conv1d_wprep = None  # prepared depthwise weight (populated on first prefill call)
+        self._fir_program_config = None
+        if self.K == 4 and self.key_dim_tp % 32 == 0 and self.value_dim_tp % 32 == 0:
+            self._fir_program_config = ttnn.QkvCausalConv1dSiluProgramConfig(
+                channel_chunk_size=next(c for c in (512, 256, 128, 64, 32) if self.qkv_dim_tp % c == 0),
+                use_bf16_addcmul=True,
+            )
         # Persistent zero sources for trace-safe reset_state_inplace (alloc before any trace)
         self._zero_conv0 = None
         self._zero_conv_carry = None
@@ -326,6 +332,59 @@ class TPGatedDeltaNet:
             self.args.dim,
             decode_out_memory_config=out_memory_config,
         )
+
+    def _conv1d_fir_prefill(
+        self,
+        qkv: ttnn.Tensor,
+        conv_state: ttnn.Tensor | None,
+        valid_len: int | list[int] | tuple[int, ...] | None,
+    ) -> tuple[ttnn.Tensor, ttnn.Tensor, ttnn.Tensor, ttnn.Tensor]:
+        """Bounded four-tap FIR with staged BF16 arithmetic and useful-token carry."""
+        T = qkv.shape[1]
+        dram = ttnn.DRAM_MEMORY_CONFIG
+        if conv_state is None:
+            history = ttnn.zeros(
+                [1, 3, self.qkv_dim_tp],
+                device=self.mesh,
+                dtype=ttnn.bfloat16,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                memory_config=dram,
+            )
+        else:
+            history = ttnn.to_layout(conv_state, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
+        row_major = ttnn.to_layout(qkv, ttnn.ROW_MAJOR_LAYOUT, memory_config=dram)
+        q, k, v = ttnn.experimental.kda.qkv_causal_conv1d_silu(
+            row_major,
+            history,
+            *self.tw["conv_taps"],
+            self.key_dim_tp,
+            self.key_dim_tp,
+            self.value_dim_tp,
+            program_config=self._fir_program_config,
+            memory_config=dram,
+        )
+        if valid_len is None:
+            tail = ttnn.slice(row_major, (0, T - 3, 0), (1, T, self.qkv_dim_tp))
+            new_state = ttnn.to_layout(tail, ttnn.TILE_LAYOUT, memory_config=dram)
+            ttnn.deallocate(tail)
+        else:
+            # Preserve fixed-bucket one-hot state selection, including lengths shorter than history.
+            padded = ttnn.concat([history, row_major], dim=1, memory_config=dram)
+            padded_tile = ttnn.to_layout(padded, ttnn.TILE_LAYOUT, memory_config=dram)
+            length = valid_len[0] if isinstance(valid_len, (list, tuple)) else valid_len
+            selector = torch.zeros(1, 3, T + 3, dtype=torch.float32)
+            for j in range(3):
+                selector[:, j, length + j] = 1.0
+            selector_tt = ttnn.from_torch(
+                selector, dtype=qkv.dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh
+            )
+            new_state = ttnn.matmul(selector_tt, padded_tile, memory_config=dram)
+            ttnn.deallocate(selector_tt)
+            ttnn.deallocate(padded_tile)
+            ttnn.deallocate(padded)
+        ttnn.deallocate(row_major)
+        ttnn.deallocate(history)
+        return q, k, v, new_state
 
     def _conv1d_prefill(self, qkv, T, conv_state):
         """Depthwise causal conv1d + SiLU via ttnn.conv1d. Returns (out [1,T,C], new_state [1,K-1,C]) DRAM TILE.
@@ -550,41 +609,42 @@ class TPGatedDeltaNet:
         _wide_mc = ttnn.L1_MEMORY_CONFIG if self._prefill_fits_l1 else ttnn.DRAM_MEMORY_CONFIG
         qkv, z, a, b = self._project_qkvzab(x, T, out_mc=_wide_mc)
 
-        # FIR conv1d; conv_state = previous chunk's last K-1 inputs (None/zero from scratch)
+        # Keep the resident native conv path; wide and masked FIR uses bounded Q/K/V production.
         _cstate = self.conv_carry if carry else None
-        if self._prefill_fits_l1 and valid_len is None:
-            # Native depthwise ttnn.conv1d (masked buckets keep the MAC FIR: valid_len new_state differs)
-            conv, conv_new_state = self._conv1d_prefill(qkv, T, _cstate)
+        _native_conv = self._prefill_fits_l1 and valid_len is None
+        if not _native_conv and self._fir_program_config is not None and T % 32 == 0:
+            q, k, v, conv_new_state = self._conv1d_fir_prefill(qkv, _cstate, valid_len)
         else:
-            conv, conv_new_state = _causal_conv1d_fir(
-                qkv,
-                None,
-                None,
-                self.K,
-                self.mesh,
-                # Conv in L1 (output freed before chunk kernel; new_state lands in DRAM internally)
-                memory_config=_wide_mc,
-                conv_state=_cstate,
-                weight_taps=tw["conv_taps"],
-                bias_dev=None,
-                valid_len=valid_len,
-            )
-        ttnn.deallocate(qkv)
-
-        # q/k/v/beta/g stay DRAM — alive across chunk kernel; L1 crashes it.
-        kd = self.key_dim_tp
-        if self._gdn_flat_qkv:
-            # Flat q/k/v: adapter splits heads inside untilize
+            if _native_conv:
+                conv, conv_new_state = self._conv1d_prefill(qkv, T, _cstate)
+            else:
+                conv, conv_new_state = _causal_conv1d_fir(
+                    qkv,
+                    None,
+                    None,
+                    self.K,
+                    self.mesh,
+                    memory_config=_wide_mc,
+                    conv_state=_cstate,
+                    weight_taps=tw["conv_taps"],
+                    bias_dev=None,
+                    valid_len=valid_len,
+                )
+            kd = self.key_dim_tp
             q = ttnn.slice(conv, (0, 0, 0), (1, T, kd))
             k = ttnn.slice(conv, (0, 0, kd), (1, T, 2 * kd))
             v = ttnn.slice(conv, (0, 0, 2 * kd), (1, T, self.qkv_dim_tp))
+            ttnn.deallocate(conv)
+        ttnn.deallocate(qkv)
+
+        # q/k/v/beta/g stay DRAM — alive across chunk kernel; L1 crashes it.
+        if self._gdn_flat_qkv:
             _qkv_head_dims = (Nk, Dk, Nv, Dv)
         else:
-            q = ttnn.reshape(ttnn.slice(conv, (0, 0, 0), (1, T, kd)), (1, T, Nk, Dk))
-            k = ttnn.reshape(ttnn.slice(conv, (0, 0, kd), (1, T, 2 * kd)), (1, T, Nk, Dk))
-            v = ttnn.reshape(ttnn.slice(conv, (0, 0, 2 * kd), (1, T, self.qkv_dim_tp)), (1, T, Nv, Dv))
+            q = ttnn.reshape(q, (1, T, Nk, Dk))
+            k = ttnn.reshape(k, (1, T, Nk, Dk))
+            v = ttnn.reshape(v, (1, T, Nv, Dv))
             _qkv_head_dims = None
-        ttnn.deallocate(conv)
         # GQA late-expand: adapter L2-norms at Nk, expands to Nv after
         beta = ttnn.reshape(ttnn.sigmoid(b), (1, T, Nv))
         ttnn.deallocate(b)
