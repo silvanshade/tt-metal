@@ -325,6 +325,34 @@ class Qwen38MTPRound:
         self.pending = None
         return frame
 
+    def append_tokens(
+        self, slot: int, tokens: list[int], position: int, pages: torch.Tensor, rope_delta: int = 0
+    ) -> dict[str, ttnn.Tensor]:
+        """Prefill known suffix tokens through the captured verification frames.
+
+        # Specification
+        - requires: a nonempty committed prefix, no pending round, and warmed traces.
+        - ensures: every supplied token is committed, without sampling or accepting drafts;
+            target KV, GDN and draft feedback end immediately after the suffix.
+        - provides: borrowed final frame; its last logits row predicts the next token.
+        - fails: ValueError for an empty suffix or an out-of-context range.
+        - panics: none.
+        - intension: existing frames and cache placements are reused; no state snapshot.
+
+        # Adequacy
+        Known-token continuation is compared with from-zero greedy generation; unlike
+        speculative acceptance, a disagreeing target prediction must not shorten input.
+        """
+        if not tokens or position < 1 or position + len(tokens) > self.target.args.max_seq_len:
+            raise ValueError(f"Invalid continuation: position={position}, tokens={len(tokens)}")
+        for offset in range(0, len(tokens), self.drafts + 1):
+            block = tokens[offset : offset + self.drafts + 1]
+            # A budget equal to the known input count disables recursive draft writes.
+            self.stage(slot, block, position + offset, pages, len(block), rope_delta)
+            self.execute(greedy=False)
+            frame = self.finish(len(block), 0)
+        return frame
+
     def release(self) -> None:
         """Release caller-owned traces before frame storage and model cache teardown."""
         for trace in self.traces.values():
