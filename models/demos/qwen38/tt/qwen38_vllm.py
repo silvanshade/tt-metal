@@ -63,6 +63,7 @@ class Qwen38ForCausalLM(Generator, SupportsMultiModal):
         "supports_async_decode": False,
         "supports_sample_on_device": True,
         "supports_native_mtp": True,
+        "supports_session_prefix_reuse": True,
     }
 
     def _validate_device_sampling_request(self, requested):
