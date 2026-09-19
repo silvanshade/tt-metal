@@ -385,7 +385,8 @@ def prefill_matmul_sharded_weight(x, weight, compute_cfg, k, fused_activation=No
         out_bytes += _PREFILL_TILE_BYTES[intermediate_dtype]
 
     # The native pipeline double-buffers inputs when batch * K-block count exceeds one.
-    batch = math.prod(x.shape[:-2])
+    shape = x.shape
+        batch = math.prod(shape[dim] for dim in range(len(shape) - 2))
     for cols in range(width_limit, 0, -1):
         per_core_n = max(1, math.ceil(n / TILE_SIZE / cols))
         block_widths = sorted(
