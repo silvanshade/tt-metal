@@ -26,12 +26,12 @@ from vllm.model_executor.models.qwen3_5 import (
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 import ttnn
+from models.common.utility_functions import is_blackhole
 from models.demos.qwen38.tt.common import create_tt_model
 from models.demos.qwen38.tt.generator_interface import prefill_dispatch, warmup_decode_buckets
 from models.demos.qwen38.tt.mtp import Qwen38MTP
 from models.demos.qwen38.tt.mtp_round import Qwen38MTPRound
 from models.tt_transformers.tt.generator import Generator
-from models.utility_functions import is_blackhole
 
 _PREFILL_WARMUP_CHUNK = 2048
 _PREFILL_WARMUP_BUCKET = 4096
