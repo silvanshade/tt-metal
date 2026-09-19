@@ -6,10 +6,18 @@
 namespace ttnn::operations::experimental::kda::qkv_causal_conv1d_silu::detail {
 void bind_qkv_causal_conv1d_silu(nb::module_& mod) {
     nb::class_<ttnn::experimental::kda::QkvCausalConv1dSiluProgramConfig>(mod, "QkvCausalConv1dSiluProgramConfig")
-        .def(nb::init<uint32_t>(), nb::kw_only(), nb::arg("channel_chunk_size").noconvert())
+        .def(
+            nb::init<uint32_t, bool>(),
+            nb::kw_only(),
+            nb::arg("channel_chunk_size").noconvert(),
+            nb::arg("use_bf16_addcmul") = false)
         .def_ro("channel_chunk_size", &ttnn::experimental::kda::QkvCausalConv1dSiluProgramConfig::channel_chunk_size)
+        .def_ro("use_bf16_addcmul", &ttnn::experimental::kda::QkvCausalConv1dSiluProgramConfig::use_bf16_addcmul)
         .def("__repr__", [](const ttnn::experimental::kda::QkvCausalConv1dSiluProgramConfig& config) {
-            return fmt::format("QkvCausalConv1dSiluProgramConfig(channel_chunk_size={})", config.channel_chunk_size);
+            return fmt::format(
+                "QkvCausalConv1dSiluProgramConfig(channel_chunk_size={}, use_bf16_addcmul={})",
+                config.channel_chunk_size,
+                config.use_bf16_addcmul);
         });
 
     ttnn::bind_function<"qkv_causal_conv1d_silu", "ttnn.experimental.kda.">(
@@ -58,6 +66,11 @@ void bind_qkv_causal_conv1d_silu(nb::module_& mod) {
                 preceding rank, matching history. For local execution, alias history.
             program_config (QkvCausalConv1dSiluProgramConfig): Required program tuning;
                 ``channel_chunk_size`` is expressed in logical channels.
+                ``use_bf16_addcmul=True`` selects SFPU multiply and three
+                SFPU addcmul stages, with BF16 materialization after every
+                stage, including before SiLU. Requires BF16 destination
+                accumulation. The default uses FPU multiply/add stages and
+                applies SiLU before materializing the final convolution sum.
             memory_config (ttnn.MemoryConfig, optional): Interleaved output memory
                 configuration. Defaults to DRAM.
             compute_kernel_config (ttnn.DeviceComputeKernelConfig, optional):

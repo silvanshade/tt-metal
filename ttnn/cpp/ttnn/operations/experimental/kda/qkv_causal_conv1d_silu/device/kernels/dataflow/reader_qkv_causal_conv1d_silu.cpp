@@ -34,7 +34,7 @@ FORCE_INLINE void load_weight_block(
     weights.push_back(4 * block_ct);
 }
 
-template <uint32_t block_ct, uint32_t num_blocks, uint32_t sp_rank, uint32_t sp_size, uint32_t local_rows>
+template <uint32_t block_ct, uint32_t num_blocks, uint32_t sp_rank, uint32_t sp_size, uint32_t local_rows, uint32_t sequence_tiles, bool channel_major>
 TT_KERNEL void reader(uint32_t wi_start, uint32_t wi_count) {
     const auto input = TensorAccessor(tensor::input);
     const auto history = TensorAccessor(tensor::history);
@@ -61,7 +61,7 @@ TT_KERNEL void reader(uint32_t wi_start, uint32_t wi_count) {
     }
 
     const uint32_t tile_bytes = weights.get_entry_size();
-    if constexpr (num_blocks == 1) {
+    if constexpr (num_blocks == 1 && !channel_major) {
         load_weight_block<block_ct>(noc, weights, tap0, tap1, tap2, tap3, tile_bytes, 0);
     }
 
@@ -71,10 +71,16 @@ TT_KERNEL void reader(uint32_t wi_start, uint32_t wi_count) {
     constexpr uint32_t block_offset_scale = tile_width * sizeof(uint16_t);
     for (uint32_t item = 0; item < wi_count; ++item) {
         const uint32_t work = wi_start + item;
-        const uint32_t mt = work / num_blocks;
-        const uint32_t ct_start = (work % num_blocks) * block_ct;
+        const uint32_t mt = channel_major ? work % sequence_tiles : work / num_blocks;
+        const uint32_t block = channel_major ? work / sequence_tiles : work % num_blocks;
+        const uint32_t ct_start = block * block_ct;
 
-        if constexpr (num_blocks > 1) {
+        if constexpr (channel_major) {
+            // Retain one channel block across this core's consecutive sequence tiles.
+            if (item == 0 || mt == 0) {
+                load_weight_block<block_ct>(noc, weights, tap0, tap1, tap2, tap3, tile_bytes, ct_start);
+            }
+        } else if constexpr (num_blocks > 1) {
             load_weight_block<block_ct>(noc, weights, tap0, tap1, tap2, tap3, tile_bytes, ct_start);
         }
 

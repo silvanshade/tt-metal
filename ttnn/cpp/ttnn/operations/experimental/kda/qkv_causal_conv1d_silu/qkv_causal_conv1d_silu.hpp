@@ -14,6 +14,8 @@ namespace ttnn::experimental::kda {
 
 struct QkvCausalConv1dSiluProgramConfig {
     uint32_t channel_chunk_size;
+    // Match BF16 multiply, three addcmul stages, then standalone SiLU.
+    bool use_bf16_addcmul = false;
 };
 
 std::tuple<ttnn::Tensor, ttnn::Tensor, ttnn::Tensor> qkv_causal_conv1d_silu(
