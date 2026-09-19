@@ -293,8 +293,8 @@ class Qwen38MLP:
                 seq, args.dim, w.w3.shape[-1], max_cols=_gw, tuning=_pt
             )
             if (pc_gate is None or pc_up is None) and self._dram_sharded:
-                # Sharded weights at full width: ttnn's fallback rejects a sharded in1, so run the
-                # row-sliced 2D matmul (SILU fused in the slice config).
+                # Sharded weights at full width require an explicit native 2D config;
+                # bound its internal output blocks, preserving the fused SILU policy.
                 w1_out = tpc.prefill_matmul_sharded_weight(
                     x, w.w1, ckc, args.dim, fused_activation=ttnn.UnaryOpType.SILU, max_cols=_gw, tuning=_pt
                 )
@@ -376,7 +376,7 @@ class Qwen38MLP:
             )
         )
         if w2_pc is None and self._dram_sharded and hidden.shape[-2] > ttnn.TILE_SIZE:
-            # Sharded w2 at full width: row-sliced 2D matmul (ttnn's fallback rejects a sharded in1).
+            # Sharded w2 at full width uses native output blocks; automatic selection rejects a sharded in1.
             partial = tpc.prefill_matmul_sharded_weight(
                 hidden,
                 w.w2,
