@@ -44,6 +44,7 @@ std::tuple<ttnn::Tensor, ttnn::Tensor, ttnn::Tensor> qkv_causal_conv1d_silu(
         k_width,
         v_width,
         program_config.channel_chunk_size,
+        program_config.use_bf16_addcmul,
         output_memory_config,
         kernel_config,
         actual_start,

@@ -63,6 +63,7 @@ ttnn::device_operation::MeshWorkloadArtifacts QkvCausalConv1dSiluProgramFactory:
     const tt::tt_metal::experimental::DFBSpecName weights_dfb_name{"weights"};
     const tt::tt_metal::experimental::DFBSpecName partial_dfb_name{"partial"};
     const tt::tt_metal::experimental::DFBSpecName output_dfb_name{"output"};
+    const tt::tt_metal::experimental::DFBSpecName broadcast_weight_dfb_name{"broadcast_weight"};
 
     const tt::tt_metal::experimental::TensorParamName input_tensor_name{"input"};
     const tt::tt_metal::experimental::TensorParamName history_tensor_name{"history"};
@@ -93,6 +94,9 @@ ttnn::device_operation::MeshWorkloadArtifacts QkvCausalConv1dSiluProgramFactory:
         make_dfb(partial_dfb_name, 2 * block_ct),
         make_dfb(output_dfb_name, 2 * block_ct),
     };
+    if (attrs.use_bf16_addcmul) {
+        dfbs.push_back(make_dfb(broadcast_weight_dfb_name, 1));
+    }
 
     tt::tt_metal::experimental::KernelSpec reader{
         .unique_id = reader_kernel_name,
@@ -115,7 +119,11 @@ ttnn::device_operation::MeshWorkloadArtifacts QkvCausalConv1dSiluProgramFactory:
                 tt::tt_metal::experimental::TensorBinding{tap2_tensor_name, "tap2"},
                 tt::tt_metal::experimental::TensorBinding{tap3_tensor_name, "tap3"},
             },
-        .compile_time_args = {{"block_ct", block_ct}, {"num_blocks", num_blocks}},
+        .compile_time_args =
+            {{"block_ct", block_ct},
+             {"num_blocks", num_blocks},
+             {"sequence_tiles", Mt},
+             {"channel_major", attrs.use_bf16_addcmul}},
         .runtime_arg_schema = {.runtime_arg_names = {"wi_start", "wi_count"}},
         .hw_config = ttnn::create_reader_datamovement_config(),
     };
@@ -138,16 +146,25 @@ ttnn::device_operation::MeshWorkloadArtifacts QkvCausalConv1dSiluProgramFactory:
                 tt::tt_metal::experimental::TensorBinding{k_tensor_name, "k"},
                 tt::tt_metal::experimental::TensorBinding{v_tensor_name, "v"},
             },
-        .compile_time_args = {{"Qt", Qt}, {"Kt", Kt}, {"Vt", Vt}, {"block_ct", block_ct}, {"num_blocks", num_blocks}},
+        .compile_time_args =
+            {{"Qt", Qt},
+             {"Kt", Kt},
+             {"Vt", Vt},
+             {"block_ct", block_ct},
+             {"num_blocks", num_blocks},
+             {"sequence_tiles", Mt},
+             {"channel_major", attrs.use_bf16_addcmul}},
         .runtime_arg_schema = {.runtime_arg_names = {"wi_start", "wi_count"}},
         .hw_config = ttnn::create_writer_datamovement_config(),
     };
 
     tt::tt_metal::experimental::KernelSpec compute{
         .unique_id = compute_kernel_name,
-        .source =
-            "ttnn/cpp/ttnn/operations/experimental/kda/qkv_causal_conv1d_silu/device/kernels/compute/"
-            "qkv_causal_conv1d_silu.cpp",
+        .source = attrs.use_bf16_addcmul
+                      ? "ttnn/cpp/ttnn/operations/experimental/kda/qkv_causal_conv1d_silu/device/kernels/compute/"
+                        "qkv_causal_conv1d_silu_bf16_addcmul.cpp"
+                      : "ttnn/cpp/ttnn/operations/experimental/kda/qkv_causal_conv1d_silu/device/kernels/compute/"
+                        "qkv_causal_conv1d_silu.cpp",
         .compiler_options = {.opt_level = tt::tt_metal::KernelBuildOptLevel::O3},
         .dfb_bindings =
             {
@@ -170,6 +187,16 @@ ttnn::device_operation::MeshWorkloadArtifacts QkvCausalConv1dSiluProgramFactory:
         .runtime_arg_schema = {.runtime_arg_names = {"wi_count"}},
         .hw_config = ttnn::to_compute_hardware_config(attrs.compute_kernel_config),
     };
+    if (attrs.use_bf16_addcmul) {
+        compute.compile_time_args = {{"block_ct", block_ct}, {"sequence_tiles", Mt}};
+        compute.runtime_arg_schema.runtime_arg_names = {"wi_start", "wi_count"};
+        compute.dfb_bindings.push_back(
+            tt::tt_metal::experimental::DFBBinding{
+                broadcast_weight_dfb_name, "broadcast_weight", tt::tt_metal::experimental::DFBEndpointType::PRODUCER});
+        compute.dfb_bindings.push_back(
+            tt::tt_metal::experimental::DFBBinding{
+                broadcast_weight_dfb_name, "broadcast_weight", tt::tt_metal::experimental::DFBEndpointType::CONSUMER});
+    }
 
     tt::tt_metal::experimental::KernelRunArgs reader_run_args{.kernel = reader_kernel_name};
     tt::tt_metal::experimental::KernelRunArgs writer_run_args{.kernel = writer_kernel_name};
@@ -180,8 +207,15 @@ ttnn::device_operation::MeshWorkloadArtifacts QkvCausalConv1dSiluProgramFactory:
             reader_run_args.runtime_arg_values, core, {{"wi_start", dist.wi_start[i]}, {"wi_count", dist.wi_count[i]}});
         tt::tt_metal::experimental::AddRuntimeArgsForNode(
             writer_run_args.runtime_arg_values, core, {{"wi_start", dist.wi_start[i]}, {"wi_count", dist.wi_count[i]}});
-        tt::tt_metal::experimental::AddRuntimeArgsForNode(
-            compute_run_args.runtime_arg_values, core, {{"wi_count", dist.wi_count[i]}});
+        if (attrs.use_bf16_addcmul) {
+            tt::tt_metal::experimental::AddRuntimeArgsForNode(
+                compute_run_args.runtime_arg_values,
+                core,
+                {{"wi_start", dist.wi_start[i]}, {"wi_count", dist.wi_count[i]}});
+        } else {
+            tt::tt_metal::experimental::AddRuntimeArgsForNode(
+                compute_run_args.runtime_arg_values, core, {{"wi_count", dist.wi_count[i]}});
+        }
     }
 
     tt::tt_metal::experimental::Group<tt::tt_metal::experimental::TensorParameter> tensor_parameters = {
