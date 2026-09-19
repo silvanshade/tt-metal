@@ -10,6 +10,13 @@ namespace ttnn::experimental::prim {
 void NLPConcatHeadsDeviceOperation::validate_on_program_cache_miss(
     const operation_attributes_t& args, const tensor_args_t& tensor_args) {
     const auto& input_tensor = tensor_args;
+    const auto& shape = input_tensor.logical_shape();
+    TT_FATAL(shape.rank() == 4, "Input tensor must have rank 4. Shape: {}", shape);
+    const auto& padded_shape = input_tensor.padded_shape();
+    TT_FATAL(
+        shape[3] % ttnn::types::TILE_SIZE == 0 && shape[3] == padded_shape[3] &&
+            shape[1] == padded_shape[1] && shape[0] == padded_shape[0],
+        "Native head concatenation requires whole, unpadded heads and batches; use logical compaction otherwise");
 
     TT_FATAL(input_tensor.storage_type() == ttnn::StorageType::DEVICE, "Operands to TM need to be on device!");
     TT_FATAL(input_tensor.buffer() != nullptr, "Operands to TM need to be allocated in buffers on device!");
