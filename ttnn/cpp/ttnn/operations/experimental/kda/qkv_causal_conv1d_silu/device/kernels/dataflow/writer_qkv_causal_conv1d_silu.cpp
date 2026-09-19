@@ -14,7 +14,7 @@ template <
     uint32_t block_ct,
     uint32_t num_blocks,
     uint32_t sequence_tiles,
-    bool channel_major>
+    uint32_t channel_major>
 TT_KERNEL void writer(uint32_t wi_start, uint32_t wi_count) {
     const auto q = TensorAccessor(tensor::q);
     const auto k = TensorAccessor(tensor::k);

@@ -34,7 +34,7 @@ FORCE_INLINE void load_weight_block(
     weights.push_back(4 * block_ct);
 }
 
-template <uint32_t block_ct, uint32_t num_blocks, uint32_t sp_rank, uint32_t sp_size, uint32_t local_rows, uint32_t sequence_tiles, bool channel_major>
+template <uint32_t block_ct, uint32_t num_blocks, uint32_t sp_rank, uint32_t sp_size, uint32_t local_rows, uint32_t sequence_tiles, uint32_t channel_major>
 TT_KERNEL void reader(uint32_t wi_start, uint32_t wi_count) {
     const auto input = TensorAccessor(tensor::input);
     const auto history = TensorAccessor(tensor::history);
