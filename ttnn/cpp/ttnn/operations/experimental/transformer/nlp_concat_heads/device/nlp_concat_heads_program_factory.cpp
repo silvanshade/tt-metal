@@ -46,7 +46,8 @@ ttnn::device_operation::ProgramArtifacts NLPConcatHeadsProgramFactory::create_pr
     uint32_t in0_w_tiles = ashape[3] / TILE_WIDTH;    // head_dim
     uint32_t in0_c = per_tensor_tiles / in0_w_tiles;  // num_heads
     uint32_t in0_HtWt = in0_h_tiles * in0_w_tiles;
-    uint32_t in0_CHtWt = in0_c * in0_HtWt;
+    // Bound staging independently of head count and distribute output tiles across cores.
+    constexpr uint32_t read_group_tiles = 32;
 
     uint32_t num_cores_x = compute_with_storage_grid_size.x;
     uint32_t num_cores_y = compute_with_storage_grid_size.y;
@@ -70,7 +71,7 @@ ttnn::device_operation::ProgramArtifacts NLPConcatHeadsProgramFactory::create_pr
             core_group_2,
             num_blocks_per_core_group_1,
             num_blocks_per_core_group_2) =
-            tt::tt_metal::split_work_to_cores(compute_with_storage_grid_size, num_blocks);
+            tt::tt_metal::split_work_to_cores(compute_with_storage_grid_size, num_blocks * per_tensor_tiles);
     }
     uint32_t g1_numcores = core_group_1.num_cores();
 
@@ -163,14 +164,13 @@ ttnn::device_operation::ProgramArtifacts NLPConcatHeadsProgramFactory::create_pr
                 .tensor_parameter_name = INPUT,
                 .accessor_name = "src",
             }},
-            .compile_time_args =
-                {
-                    {"in0_h_tiles", in0_h_tiles},
-                    {"in0_w_tiles", in0_w_tiles},
-                    {"in0_c", in0_c},
-                    {"in0_HtWt", in0_HtWt},
-                },
-            .runtime_arg_schema = {.runtime_arg_names = {"num_blocks", "in0_h_dim", "in0_tensor_tile_id"}},
+            .compile_time_args = {
+                {"in0_h_tiles", in0_h_tiles},
+                {"in0_w_tiles", in0_w_tiles},
+                {"in0_c", in0_c},
+                {"read_group_tiles", read_group_tiles},
+            },
+            .runtime_arg_schema = {.runtime_arg_names = {"num_pages", "start_id"}},
             .hw_config = create_reader_datamovement_config(),
         };
         // The interleaved writer reuses the shared Metal 2.0 fork of
@@ -196,10 +196,7 @@ ttnn::device_operation::ProgramArtifacts NLPConcatHeadsProgramFactory::create_pr
     }
 
     // Create dataflow buffers
-    uint32_t in0_dfb_num_entries = per_tensor_tiles;
-    if (!in_sharded) {
-        in0_dfb_num_entries *= 2;  // double buffer
-    }
+    uint32_t in0_dfb_num_entries = in_sharded ? per_tensor_tiles : 2 * read_group_tiles;
     Group<DataflowBufferSpec> dataflow_buffers;
     dataflow_buffers.push_back(DataflowBufferSpec{
         .unique_id = IN0_DFB,
@@ -248,30 +245,14 @@ ttnn::device_operation::ProgramArtifacts NLPConcatHeadsProgramFactory::create_pr
         }
 
     } else {
-        for (uint32_t i = 0, num_blocks_written = 0; i < cores.size(); ++i) {
+        for (uint32_t i = 0, start_id = 0; i < cores.size(); ++i) {
             const CoreCoord& core = cores[i];
-            uint32_t num_blocks_per_core = i < g1_numcores ? num_blocks_per_core_group_1 : num_blocks_per_core_group_2;
-
-            uint32_t in0_h_dim = num_blocks_written % in0_h_tiles;
-            uint32_t in0_tensor_tile_id = (num_blocks_written / in0_h_tiles * in0_CHtWt) + (in0_h_dim * in0_w_tiles);
-
+            const uint32_t num_pages = i < g1_numcores ? num_blocks_per_core_group_1 : num_blocks_per_core_group_2;
             AddRuntimeArgsForNode(
-                reader_run_args.runtime_arg_values,
-                core,
-                {
-                    {"num_blocks", num_blocks_per_core},
-                    {"in0_h_dim", in0_h_dim},
-                    {"in0_tensor_tile_id", in0_tensor_tile_id},
-                });
-
+                reader_run_args.runtime_arg_values, core, {{"num_pages", num_pages}, {"start_id", start_id}});
             AddRuntimeArgsForNode(
-                writer_run_args.runtime_arg_values,
-                core,
-                {
-                    {"num_pages", num_blocks_per_core * per_tensor_tiles},
-                    {"start_id", num_blocks_written * per_tensor_tiles},
-                });
-            num_blocks_written += num_blocks_per_core;
+                writer_run_args.runtime_arg_values, core, {{"num_pages", num_pages}, {"start_id", start_id}});
+            start_id += num_pages;
         }
     }
 
