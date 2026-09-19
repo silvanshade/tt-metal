@@ -26,6 +26,7 @@ from vllm.model_executor.models.qwen3_5 import (
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 import ttnn
+from models.common.utility_functions import is_blackhole
 from models.demos.qwen38.tt.common import create_tt_model
 from models.demos.qwen38.tt.generator_interface import prefill_dispatch, warmup_decode_buckets
 from models.demos.qwen38.tt.mtp import Qwen38MTP
@@ -271,8 +272,8 @@ class Qwen38ForCausalLM(Generator, SupportsMultiModal):
 
         prefill_traced_chunked rounds the prompt up to a fixed bucket and masks the GDN to the
         EXACT valid_len, so prefill runs one of a bounded, pre-warmed program set (the
-        compile-clobbers-trace fix) — for <=2048 prompts it is entirely the masked bucket (no
-        chunk trace needed). Longer prompts replay the chunk-outer trace (Milestone B). Returns
+        compile-clobbers-trace fix). Prompts shorter than the configured outer chunk use only
+        the masked bucket; longer prompts replay the chunk-outer trace (Milestone B). Returns
         host logits [1, 1, vocab] gathered to a single replica."""
         T = int(prompt_lens[0]) if prompt_lens is not None else tokens.shape[1]
         if tokens.shape[1] > T:
@@ -414,6 +415,11 @@ class Qwen38ForCausalLM(Generator, SupportsMultiModal):
             num_blocks = math.ceil(_PREFILL_WARMUP_BUCKET / _BLOCK_SIZE)
         page_table = torch.arange(num_blocks, dtype=torch.int32).reshape(1, num_blocks)
         model = self.model[0]
+        # Eighty sequence tiles divide the ten-row projection grid without M padding.
+        # Only the single-slot Blackhole TP=1 path changes; chunk/tail storage stays DRAM.
+        chunk_size = _PREFILL_WARMUP_CHUNK
+        if is_blackhole() and model.tp_path and model.args.num_devices == 1 and model.args.max_batch_size == 1:
+            chunk_size = 2560
         # Batched serving (max_num_seqs>1): the decode buffers are [B,...], but prefill runs B=1. Bind
         # the PERSISTENT B=1 GDN prefill scratch and capture the chunk trace against IT, so long prompts
         # (>chunk_size) replay the traced chunk-outer path per user instead of the slower eager fallback.
@@ -423,12 +429,12 @@ class Qwen38ForCausalLM(Generator, SupportsMultiModal):
         logger.info(
             f"Starting Qwen prefill warmup: chunk-prefill {'trace' if enable_trace else 'compile'}"
             f"{' (batched, B=1 scratch)' if batched else ''} "
-            f"(chunk={_PREFILL_WARMUP_CHUNK}, page_table_blocks={num_blocks})..."
+            f"(chunk={chunk_size}, page_table_blocks={num_blocks})..."
         )
         prev = model._bind_gdn_prefill_scratch() if batched else None
         try:
             model.capture_prefill_trace_chunked(
-                self.mesh_device, page_table, chunk_size=_PREFILL_WARMUP_CHUNK, capture_chunk_trace=enable_trace
+                self.mesh_device, page_table, chunk_size=chunk_size, capture_chunk_trace=enable_trace
             )
             if batched and not enable_trace:
                 composer = ttnn.ConcatMeshToTensor(self.mesh_device, dim=0)

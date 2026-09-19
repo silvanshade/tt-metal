@@ -818,10 +818,11 @@ class TPAttention:
         else:
             q8 = q
 
-        # BF16 queries with BFP8 or BF16 KV need smaller tiles: 128x128 SDPA
-        # CBs overlap live prefill L1 tensors. Fully quantized and BFP4-KV
-        # paths retain 128; dynamic offsets align to the selected tile.
-        cap = 64 if not self._sdpa_bf8 and k_paged.dtype in (ttnn.bfloat8_b, ttnn.bfloat16) else 128
+        # Larger outer chunks retain more live L1 tensors. Above 2048, even
+        # BFP4-KV 128x128 SDPA CBs collide with that residency; cap both tiles
+        # at 64 without moving tensors or changing precision. BF16 queries
+        # with BFP8/BF16 KV already require that cap at smaller lengths.
+        cap = 64 if S > 2048 or (not self._sdpa_bf8 and k_paged.dtype in (ttnn.bfloat8_b, ttnn.bfloat16)) else 128
         if chunk_start_idx_tensor is not None:
             qk_chunk = cap
         else:

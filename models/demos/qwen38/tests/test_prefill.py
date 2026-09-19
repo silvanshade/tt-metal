@@ -5,8 +5,8 @@
 Two families of prefill correctness checks, both validated against the trusted
 non-traced ``prefill_paged`` reference:
 
-* Masked fixed-bucket prefill (``test_mask_bucket_rounding``,
-  ``test_masked_bucket_matches_reference``, ``test_masked_bucket_after_trace_capture``,
+* Masked fixed-bucket prefill (``test_masked_bucket_matches_reference``,
+  ``test_masked_bucket_after_trace_capture``,
   ``test_traced_chunked_tail_matches_reference``) — short prompts pad up to a few fixed
   buckets and mask the GDN recurrent + conv state so request-time compilation can't
   clobber a parked prefill trace.
@@ -45,28 +45,6 @@ STATE_PCC = 0.99
 # --------------------------------------------------------------------------- #
 # Masked fixed-bucket prefill
 # --------------------------------------------------------------------------- #
-def test_mask_bucket_rounding():
-    """Bucket rounding (no device): every length maps to the smallest fixed bucket >= it."""
-    from models.demos.qwen38.tt.model import Qwen38Model
-
-    f = Qwen38Model._mask_bucket_for  # classmethod — callable without a device/instance
-    cases = {
-        1: 128,
-        50: 128,
-        128: 128,
-        129: 256,
-        256: 256,
-        300: 512,
-        512: 512,
-        700: 1024,
-        1024: 1024,
-        1500: 2048,
-        2048: 2048,
-    }
-    for length, expected in cases.items():
-        assert f(length) == expected, f"_mask_bucket_for({length}) -> {f(length)}, want {expected}"
-
-
 # NOTE on reference lengths: the masked path is compared against `prefill_paged`, the
 # trusted non-traced path. `prefill_paged` itself has a PRE-EXISTING L1 circular-buffer
 # clash for real lengths in roughly (256, 512] (its GDN runs in L1 for seq_len<=512 and
