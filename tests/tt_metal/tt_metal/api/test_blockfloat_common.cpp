@@ -3,15 +3,144 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <gtest/gtest.h>
-#include <cstdint>
-#include "impl/data_format/blockfloat_common.hpp"
+#include <algorithm>
 #include <array>
 #include <bit>
+#include <cstdint>
 #include <memory>
-
+#include <span>
+#include <vector>
+#include <oneapi/tbb/task_arena.h>
+#include "impl/data_format/blockfloat_common.hpp"
+#include "impl/data_format/blockfloat_pack.hpp"
 #include <tt-metalium/tt_backend_api_types.hpp>
 #include <umd/device/types/arch.hpp>
 #include "jit_build/data_format.hpp"
+
+TEST(HostBfpPack, NumericalBoundariesPreservePackedWords) {
+    namespace bfp = tt::tt_metal::detail::bfp;
+    auto check = []<int Bits>() {
+        for (bool exp_a : {false, true}) {
+            for (uint32_t exponent : {0u, 1u, 111u, 112u, 113u, 126u, 127u, 143u, 144u, 254u, 255u}) {
+                // Same-exponent rounding ties, opposite signs, zero/subnormal flushing,
+                // exponent rebias saturation and shifts beyond the source word width.
+                constexpr unsigned shift = 25 - Bits;
+                std::array<uint32_t, 16> raw{
+                    0u,
+                    0x80000000u,
+                    1u,
+                    0x80000001u,
+                    (exponent << 23),
+                    (exponent << 23) | 0x80000000u,
+                    (exponent << 23) | ((1u << (shift - 1)) - 1),
+                    (exponent << 23) | (1u << (shift - 1)),
+                    (exponent << 23) | ((1u << (shift - 1)) + 1),
+                    (exponent << 23) | 0x7fffffu,
+                    (exponent << 23) | 0x807fffffu,
+                    0x00800000u,
+                    0x37800000u,
+                    0x38000000u,
+                    0x3f800000u,
+                    0xbf800000u};
+                unsigned shared = 0;
+                for (auto value : raw) {
+                    shared = std::max(shared, (value >> 23) & 255);
+                }
+                if (exp_a) {
+                    shared = std::clamp(int(shared) - 112, 0, 31);
+                }
+                std::vector<uint32_t> expected(4 + Bits / 2, 0);
+                expected[0] = shared;
+                for (unsigned lane = 0; lane < raw.size(); ++lane) {
+                    const auto value = raw[lane];
+                    int exp = (value >> 23) & 255;
+                    unsigned quantized = 0;
+                    if (exp != 0) {
+                        unsigned significand = value & 0x7fffff;
+                        if (exp_a) {
+                            exp -= 112;
+                            if (exp < 0) {
+                                exp = 0;
+                                significand = 0;
+                            }
+                            if (exp > 31) {
+                                exp = 31;
+                                significand = 0x7fffff;
+                            }
+                        }
+                        significand += 0x800000;
+                        while (unsigned(exp) < shared) {
+                            significand /= 2;
+                            ++exp;
+                        }
+                        const unsigned divisor = 1u << shift;
+                        quantized = significand / divisor;
+                        const auto remainder = significand % divisor;
+                        if (remainder > divisor / 2 || (remainder == divisor / 2 && quantized % 2)) {
+                            ++quantized;
+                        }
+                        quantized = std::min(quantized, (1u << (Bits - 1)) - 1);
+                        if (quantized) {
+                            quantized |= (value >> 31) << (Bits - 1);
+                        }
+                    }
+                    expected[4 + lane / (32 / Bits)] |= quantized << ((lane % (32 / Bits)) * Bits);
+                }
+                std::array<float, 16> input;
+                std::transform(
+                    raw.begin(), raw.end(), input.begin(), [](uint32_t v) { return std::bit_cast<float>(v); });
+                EXPECT_EQ(bfp::pack_tiles<Bits>(std::span<const float>(input), 1, 16, 1, 16, true, exp_a), expected);
+            }
+        }
+    };
+    check.template operator()<2>();
+    check.template operator()<4>();
+    check.template operator()<8>();
+}
+
+TEST(HostBfpPack, FaceOrderPaddingAndNestedCallers) {
+    namespace bfp = tt::tt_metal::detail::bfp;
+    oneapi::tbb::task_arena arena(2);
+    for (unsigned height : {1u, 8u, 32u}) {
+        for (unsigned width : {16u, 32u}) {
+            const unsigned face_height = std::min(height, 16u);
+            const unsigned elements = height * width;
+            const unsigned tile_words = 16 + elements / 4;
+            std::vector<float> row_major(65 * elements), face_major(row_major.size());
+            std::vector<uint32_t> expected(65 * tile_words, 0);
+            for (unsigned tile = 0; tile < 65; ++tile) {
+                unsigned group = 0;
+                for (unsigned fy = 0; fy < height; fy += face_height) {
+                    for (unsigned fx = 0; fx < width; fx += 16) {
+                        for (unsigned y = 0; y < face_height; ++y, ++group) {
+                            unsigned exponent = 100 + (tile + (fy + y) * 2 + fx / 16) % 60;
+                            expected[tile * tile_words + group / 4] |= exponent << (8 * (group % 4));
+                            for (unsigned lane = 0; lane < 16; ++lane) {
+                                unsigned magnitude = 64 + lane;
+                                unsigned sign = lane % 2;
+                                float value = std::bit_cast<float>((sign << 31) | (exponent << 23) | (lane << 17));
+                                row_major[tile * elements + (fy + y) * width + fx + lane] = value;
+                                face_major[tile * elements + group * 16 + lane] = value;
+                                expected[tile * tile_words + 16 + group * 4 + lane / 4] |= (magnitude | (sign << 7))
+                                                                                           << (8 * (lane % 4));
+                            }
+                        }
+                    }
+                }
+            }
+            arena.execute([&] {
+                oneapi::tbb::parallel_for(0, 4, [&](int caller) {
+                    bool is_row_major = caller % 2 == 0;
+                    const auto& input = is_row_major ? row_major : face_major;
+                    EXPECT_EQ(
+                        bfp::pack_tiles<8>(
+                            std::span<const float>(input), height, width, face_height, 64, is_row_major, false),
+                        expected);
+                });
+            });
+        }
+    }
+}
 
 namespace {
 
