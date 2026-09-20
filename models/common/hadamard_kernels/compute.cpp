@@ -45,6 +45,13 @@ void kernel_main() {
     compute_kernel_hw_startup(0, 16);
     reconfig_data_format<SrcOrder::Reverse>(0, 1);
     pack_reconfig_data_format(16);
+    if constexpr (scale != 0) {
+        // The residual scale is an SFPU op on dest and needs its own init. That init
+        // sets the SFPU config register and ADDR_MOD_7; the matmul mods are 0 to 5 and
+        // the MOP is untouched, so initializing both here leaves each path configured
+        // for the whole kernel and costs nothing per tile.
+        binop_with_scalar_tile_init();
+    }
     if constexpr (stage_mop) {
         hadamard_stage_init(0, 1);
     } else {
