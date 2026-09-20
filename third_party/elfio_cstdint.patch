@@ -1,0 +1,13 @@
+diff --git a/elfio/elf_types.hpp b/elfio/elf_types.hpp
+index c4f6b47..6859b21 100644
+--- a/elfio/elf_types.hpp
++++ b/elfio/elf_types.hpp
+@@ -23,6 +23,8 @@ THE SOFTWARE.
+ #ifndef ELFTYPES_H
+ #define ELFTYPES_H
+ 
++#include <cstdint>
++
+ #ifdef __cplusplus
+ namespace ELFIO {
+ #endif
