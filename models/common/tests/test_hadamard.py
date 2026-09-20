@@ -89,6 +89,29 @@ def test_many_blocks_and_partial_rows(ttnn_mesh_device):
             ttnn.deallocate(tensor)
 
 
+def test_stage_primitive_matches_the_stock_matmul_path(ttnn_mesh_device, monkeypatch):
+    """The two-phase stage primitive must return exactly what three phases return.
+
+    Phase 1 multiplies the stage operand's absent low mantissa half, so skipping
+    it is exact: a wrong phase step lands the second pass on phase 1 instead of
+    phase 2, drops the activation's low half, and breaks this equality.
+    """
+    values = torch.randn((1, 1, 32, 256), generator=torch.Generator().manual_seed(909)).bfloat16()
+    results = {}
+    for flag in ("0", "1"):
+        monkeypatch.setenv("QWEN_HADAMARD_STAGE_MOP", flag)
+        source, stage, result = _rotate(ttnn_mesh_device, values)
+        try:
+            results[flag] = ttnn.to_torch(result).clone()
+        finally:
+            for tensor in (result, stage, source):
+                ttnn.deallocate(tensor)
+    assert torch.equal(results["0"], results["1"])
+    expected = _reference(values)
+    bound = expected.square().mean(-1, keepdim=True).sqrt() * 0.04
+    assert torch.all((results["1"].double() - expected).abs() <= bound)
+
+
 @pytest.mark.parametrize("shape", SERVED_SHAPES)
 def test_served_shapes_against_the_dense_matmul(ttnn_mesh_device, shape):
     """The program must agree with the dense H256 matmul it replaces, shape by shape."""
