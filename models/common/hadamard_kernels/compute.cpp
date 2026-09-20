@@ -4,7 +4,6 @@
 #include "api/compute/matmul.h"
 #include "api/compute/experimental/hadamard.h"
 #include "api/compute/pack.h"
-#include "api/compute/reconfig_data_format.h"
 #include "api/compute/reg_api.h"
 #include "api/compute/cb_api.h"
 #include "api/compute/eltwise_unary/binop_with_scalar.h"
@@ -42,9 +41,9 @@ void kernel_main() {
     const uint32_t first = get_arg_val<uint32_t>(0);
     const uint32_t count = get_arg_val<uint32_t>(1);
 
-    compute_kernel_hw_startup(0, 16);
-    reconfig_data_format<SrcOrder::Reverse>(0, 1);
-    pack_reconfig_data_format(16);
+    // Matmul maps in0 to SrcB and in1 to SrcA, so the one-time configuration takes
+    // the reverse source order and both operand CBs, as matmul_init requires.
+    compute_kernel_hw_startup<SrcOrder::Reverse>(0, 1, 16);
     if constexpr (scale != 0) {
         // The residual scale is an SFPU op on dest and needs its own init. That init
         // sets the SFPU config register and ADDR_MOD_7; the matmul mods are 0 to 5 and
