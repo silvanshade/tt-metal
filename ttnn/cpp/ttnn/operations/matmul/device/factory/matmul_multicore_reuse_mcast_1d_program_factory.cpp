@@ -5,6 +5,7 @@
 #include "ttnn/operations/matmul/device/factory/matmul_multicore_reuse_mcast_1d_program_factory.hpp"
 #include "ttnn/operations/matmul/device/utilities/matmul_utilities.hpp"
 #include <algorithm>
+#include <cstdlib>
 #include <utility>
 
 #include "hostdevcommon/common_values.hpp"
@@ -56,6 +57,30 @@ using tt::tt_metal::experimental::WorkUnitSpec;
 namespace ttnn::prim {
 
 namespace reuse_mcast_1d_optimized_helpers {
+
+// Blackhole admits roughly one DRAM read request per 16.4 cycles per endpoint per NoC, so the in1
+// sender's 576-byte per-tile weight requests stall well below channel bandwidth on one NoC
+// (tenstorrent/tt-metal#55898). Alternating them across both NoCs needs NOC_MODE::DM_DYNAMIC_NOC,
+// which a kernel group takes as a whole, so every data-movement kernel on these cores carries the
+// mode even though only the in1 reader changes what it issues.
+//
+// Default on for Blackhole. TT_MATMUL_IN1_BOTH_NOC overrides it per call, which is what lets one
+// process run the single-NoC and both-NoC arms against the same input for the bit-identity test;
+// it is deliberately not cached for that reason.
+#ifndef TTNN_MATMUL_IN1_BOTH_NOC
+#define TTNN_MATMUL_IN1_BOTH_NOC 1
+#endif
+
+bool matmul_in1_both_noc_enabled(tt::ARCH arch, bool in1_reads_dram_per_tile) {
+    if (arch != tt::ARCH::BLACKHOLE || !in1_reads_dram_per_tile) {
+        return false;
+    }
+    const char* override_value = std::getenv("TT_MATMUL_IN1_BOTH_NOC");
+    if (override_value != nullptr && override_value[0] != '\0') {
+        return override_value[0] != '0';
+    }
+    return TTNN_MATMUL_IN1_BOTH_NOC != 0;
+}
 
 uint32_t get_preferred_noc(
     const ttnn::CoreCoord src,
@@ -612,6 +637,15 @@ MatmulMultiCoreReuseMcast1DProgramFactory::shared_variables_t process_mcast_in0_
     tt_metal::NOC in0_noc = tt::tt_metal::detail::preferred_noc_for_dram_write(device.arch());
     tt_metal::NOC in1_noc = tt::tt_metal::detail::preferred_noc_for_dram_read(device.arch());
 
+    // Only the accessor-addressed in1 path reads DRAM one tile at a time; an L1-sharded in1 or the
+    // global-CB prefetcher never enters that loop, and there the dynamic mode would be pure cost.
+    const bool in1_both_noc = matmul_in1_both_noc_enabled(device.arch(), !in1_is_locally_sharded && !use_global_cb);
+    const tt_metal::NOC_MODE noc_mode =
+        in1_both_noc ? tt_metal::NOC_MODE::DM_DYNAMIC_NOC : tt_metal::NOC_MODE::DM_DEDICATED_NOC;
+    if (in1_both_noc) {
+        mm_kernel_in1_sender_writer_defines["DRAM_READ_BOTH_NOC"] = "1";
+    }
+
     if (fuse_op && fused_op_signaler->is_all_gather()) {
         // Create semaphores
         fused_op_signaler->init_fused_op(
@@ -632,6 +666,7 @@ MatmulMultiCoreReuseMcast1DProgramFactory::shared_variables_t process_mcast_in0_
         tt_metal::DataMovementConfig{
             .processor = tt_metal::DataMovementProcessor::RISCV_1,
             .noc = in0_noc,
+            .noc_mode = noc_mode,
             .compile_args = in0_sender_compile_time_args,
             .defines = mm_kernel_in0_sender_writer_defines,
             .named_compile_args = {
@@ -659,6 +694,7 @@ MatmulMultiCoreReuseMcast1DProgramFactory::shared_variables_t process_mcast_in0_
                 tt_metal::DataMovementConfig{
                     .processor = tt_metal::DataMovementProcessor::RISCV_1,
                     .noc = in0_noc,
+                    .noc_mode = noc_mode,
                     .compile_args = in0_sender_compile_time_args,
                     .defines = mm_kernel_in0_sender_writer_defines,
                     .named_compile_args = {
@@ -678,6 +714,7 @@ MatmulMultiCoreReuseMcast1DProgramFactory::shared_variables_t process_mcast_in0_
                 tt_metal::DataMovementConfig{
                     .processor = tt_metal::DataMovementProcessor::RISCV_1,
                     .noc = in0_noc,
+                    .noc_mode = noc_mode,
                     .compile_args = in0_sender_compile_time_args,
                     .defines = mm_kernel_in0_sender_writer_defines,
                     .named_compile_args = {
@@ -697,6 +734,7 @@ MatmulMultiCoreReuseMcast1DProgramFactory::shared_variables_t process_mcast_in0_
             tt_metal::DataMovementConfig{
                 .processor = tt_metal::DataMovementProcessor::RISCV_1,
                 .noc = in0_noc,
+                .noc_mode = noc_mode,
                 .compile_args = in0_receiver_compile_time_args,
                 .named_compile_args = {
                     {"cb_in0", tt::CBIndex::c_0},
@@ -710,6 +748,7 @@ MatmulMultiCoreReuseMcast1DProgramFactory::shared_variables_t process_mcast_in0_
         tt_metal::DataMovementConfig{
             .processor = tt_metal::DataMovementProcessor::RISCV_0,
             .noc = in1_noc,
+            .noc_mode = noc_mode,
             .compile_args = in1_sender_writer_compile_time_args,
             .defines = mm_kernel_in1_sender_writer_defines,
             .named_compile_args = {
@@ -3548,6 +3587,15 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_artifac
 
     mm_kernel_in1_sender_writer_defines["SKIP_MCAST"] = "1";
 
+    // Only the accessor-addressed in1 path reads DRAM one tile at a time; an L1-sharded in1 never
+    // enters that loop, and there the dynamic mode would be pure cost.
+    const bool in1_both_noc = matmul_in1_both_noc_enabled(device.arch(), !in1_is_sharded);
+    const tt_metal::NOC_MODE noc_mode =
+        in1_both_noc ? tt_metal::NOC_MODE::DM_DYNAMIC_NOC : tt_metal::NOC_MODE::DM_DEDICATED_NOC;
+    if (in1_both_noc) {
+        mm_kernel_in1_sender_writer_defines["DRAM_READ_BOTH_NOC"] = "1";
+    }
+
     // in1 is the reader of weights/output writer, and we choose to make it use the optimized reader noc
     tt_metal::NOC in0_noc = tt::tt_metal::detail::preferred_noc_for_dram_write(device.arch());
     tt_metal::NOC in1_noc = tt::tt_metal::detail::preferred_noc_for_dram_read(device.arch());
@@ -3755,6 +3803,7 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_artifac
             DataMovementHardwareConfig::DataMovement1XXConfig{
                 .processor = tt_metal::DataMovementProcessor::RISCV_1,
                 .noc = in0_noc,
+                .noc_mode = noc_mode,
             },
     };
     const auto in1_sender_hw_config = DataMovementHardwareConfig{
@@ -3762,6 +3811,7 @@ static ttnn::device_operation::ProgramArtifacts create_program_mcast_in0_artifac
             DataMovementHardwareConfig::DataMovement1XXConfig{
                 .processor = tt_metal::DataMovementProcessor::RISCV_0,
                 .noc = in1_noc,
+                .noc_mode = noc_mode,
             },
     };
 
