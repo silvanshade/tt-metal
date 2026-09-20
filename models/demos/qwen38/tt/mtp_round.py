@@ -98,7 +98,6 @@ class Qwen38MTPRound:
         return ttnn.reshape(ttnn.argmax(valid, dim=-1, keepdim=True), (logits.shape[-2], 1))
 
     def _verify(self, count: int, slot: int) -> None:
-
         frame = self.frames[count]
         positions = ttnn.add(frame["base"], frame["offsets"])
         cos, sin = self._rotations(positions, frame["delta"], count)
@@ -115,7 +114,6 @@ class Qwen38MTPRound:
         ttnn.deallocate(hidden)
 
     def _accept(self, count: int) -> None:
-
         frame = self.frames[count]
         tokens = ttnn.reshape(self._float(frame["tokens"]), (1, 1, count, 1))
         inputs = ttnn.reshape(self._float(frame["ids"]), (1, 1, count, 1))
