@@ -488,6 +488,27 @@ if(TT_METAL_USE_EMULE)
 endif()
 
 ############################################################################################################################
+# ELFIO : https://github.com/serge1/ELFIO
+#
+# tt-exalens declares this itself, but only `if(NOT TARGET elfio)`, and its copy is unpatched.
+# Release_3.12's elfio/elf_types.hpp names uint16_t/uint32_t/uint64_t without including <cstdint>,
+# which recent libstdc++ no longer provides transitively, so ttexalens_elf fails to compile. Declare
+# the patched package first and build the same INTERFACE target tt-exalens expects; its own block
+# then sees the target and skips.
+############################################################################################################################
+CPMAddPackage(
+    NAME ELFIO
+    GITHUB_REPOSITORY serge1/ELFIO
+    GIT_TAG Release_3.12
+    EXCLUDE_FROM_ALL YES
+    DOWNLOAD_ONLY YES
+    PATCHES
+        elfio_cstdint.patch
+)
+add_library(elfio INTERFACE)
+target_include_directories(elfio SYSTEM INTERFACE "${ELFIO_SOURCE_DIR}")
+
+############################################################################################################################
 # tt-exalens (only native ELF/DWARF parser)
 ############################################################################################################################
 CPMAddPackage(
