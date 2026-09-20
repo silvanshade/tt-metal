@@ -199,7 +199,7 @@ def _make_lm_head_tensors(device):
 # ---------------------------------------------------------------------------
 
 
-def test_noc_vc_state_not_leaked_after_dram_sharded_matmul(device):
+def test_noc_vc_state_not_leaked_after_dram_sharded_matmul(device, monkeypatch):
     """Assert lm_head is not slowed down by residual NOC VC state from a DRAM-sharded matmul.
 
     reader_bmm_tile_layout_in1_sender_dram_sharded.cpp calls
@@ -221,6 +221,13 @@ def test_noc_vc_state_not_leaked_after_dram_sharded_matmul(device):
     grid = device.compute_with_storage_grid_size()
     if grid.x < _LM_GRID_X or grid.y < _LM_GRID_Y:
         pytest.skip(f"Device compute grid {grid.x}x{grid.y} smaller than required {_LM_GRID_X}x{_LM_GRID_Y}")
+
+    # The probe only sees the leak while the lm_head reader inherits NOC_CTRL. In
+    # NOC_MODE::DM_DYNAMIC_NOC that reader rewrites NOC_CTRL on every read request
+    # (blackhole/noc_nonblocking_api.h:490-493), which masks a stale VC and would make this
+    # measurement pass whether or not the DRAM-sharded reader restores the register. Pin the
+    # arm under test to the dedicated path so it keeps measuring what it was written to measure.
+    monkeypatch.setenv("TT_MATMUL_IN1_BOTH_NOC", "0")
 
     ds_cfg = _ds_program_config()
     lm_cfg = _lm_head_program_config()
