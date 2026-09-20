@@ -22,6 +22,14 @@ GDN_CONV1D_L1_SMALL_SIZE = 24576
 # 32/32 greedy-exact.
 DEFAULT_DECODE_MATMUL = "dram_sharded"
 
+# Decode layout for the GDN [dim, qkvzab] in-projection when QWEN38_QKVZAB_LAYOUT is unset; it
+# overrides DEFAULT_DECODE_MATMUL for this one shape. Its padded width is 520 tiles, so 520/8 banks
+# = 65 is odd and create_dram_sharded_matmul_program_config drops it to one reader per bank: on
+# p150a at 23K the 48 sharded in-projections then read at 165.1 GB/s against 274 GB/s on the 1D arm
+# they replaced, +5.455 ms on the ordinary decode step. The sharded arm stays reachable with
+# QWEN38_QKVZAB_LAYOUT=dram_sharded so a two-reader arm can be measured for this shape.
+DEFAULT_QKVZAB_LAYOUT = "1d"
+
 
 class Qwen38ModelArgs(ModelArgs):
     """ModelArgs for Qwen3.5 / 3.6 / 3.8 on Blackhole (9B / 27B / 35B-A3B; dense + MoE)."""
@@ -189,6 +197,15 @@ class Qwen38ModelArgs(ModelArgs):
         # output width in tiles is odd (gdn_qkvzab).
         self.dram_sharded_workers = max(1, int(os.environ.get("QWEN38_DRAM_SHARDED_WORKERS", "2")))
         _w = self.dram_sharded_workers
+        # Per-shape override for the GDN qkvzab in-projection (QWEN38_DRAM_SHARDED_WORKERS is global;
+        # this one shape needs its own arm). It selects within the dram_sharded arm only: the 1d arm
+        # already runs every shape interleaved, so the effective layout there is "1d" whatever the
+        # override says. See DEFAULT_QKVZAB_LAYOUT for the measurement that sets the default.
+        _qkvzab = os.environ.get("QWEN38_QKVZAB_LAYOUT", DEFAULT_QKVZAB_LAYOUT).strip().lower()
+        if _qkvzab not in ("1d", "dram_sharded"):
+            raise ValueError(f"QWEN38_QKVZAB_LAYOUT must be '1d' or 'dram_sharded', got {_qkvzab!r}")
+        self.gdn_qkvzab_layout = _qkvzab if _dram_sharded else "1d"
+        self.gdn_qkvzab_1d_decode = self.gdn_qkvzab_layout == "1d"
 
         # DRAM-sharded weights: column-parallel [hidden, out_tp]
         self.gdn_qkvz_weight_memcfg = tpc.create_dram_sharded_mem_config(self.dim, self.gdn_qkvz_dim_tp)
@@ -284,6 +301,8 @@ class Qwen38ModelArgs(ModelArgs):
         # Input-projection 1D decode: same idea for attn QKV+gate and GDN QKVZAB in-projections.
         # Weights load interleaved (prefill AGMM verified bit-identical); tuned grids, carried as the
         # 1d control of tests/test_decode_matmul_layout_sweep.py.
+        # Arm-wide flag: every shape but GDN qkvzab reads it, and gdn/tp.py reads gdn_qkvzab_1d_decode
+        # instead, so the qkvzab override moves that shape alone.
         self.proj_1d_decode = not _dram_sharded
         self.attn_qkv_decode_1d_progcfg = tpc.create_matmul_1d_decode_progcfg(
             M, self.dim, self.attn_qkv_fused_dim_tp, num_cores=64
