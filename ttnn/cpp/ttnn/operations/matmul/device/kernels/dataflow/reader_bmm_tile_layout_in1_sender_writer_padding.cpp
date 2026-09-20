@@ -20,6 +20,10 @@
 #include "api/tensor/noc_traits.h"
 #include "api/dataflow/endpoints.h"
 #include "api/core_local_mem.h"
+#include "ttnn/cpp/ttnn/kernel_lib/dram_read_noc.hpp"
+
+using dataflow_kernel_lib::DramReadNoc;
+
 void kernel_main() {
     // READER
     uint32_t rt_args_idx = 0;
@@ -195,6 +199,9 @@ void kernel_main() {
     constexpr uint32_t output_single_tile_size_bytes = get_tile_size(dfb_id_out0);
 
     const Noc noc;
+    // Per-tile DRAM reads alternate across both NoCs when the factory puts this kernel group in
+    // DM_DYNAMIC_NOC; everything else this kernel issues stays on `noc`.
+    DramReadNoc dram_noc;
     DataflowBuffer dfb_in1(dfb_id_in1);
     DataflowBuffer dfb_out(dfb_id_out0);
     Semaphore<> sender_sem(get_compile_time_arg_val(10));
@@ -339,7 +346,7 @@ void kernel_main() {
                                 if (bw < num_blocks_w_dim - 1 || w < last_block_w) {
                                     uint32_t tile_byte_offset =
                                         in1_dram_batch_offset + in1_tensor_tile_id * in1_single_tile_size_bytes;
-                                    noc.async_read(
+                                    dram_noc.next().async_read(
                                         dram_src,
                                         CoreLocalMem<uint32_t>(l1_write_addr_in1),
                                         in1_single_tile_size_bytes,
@@ -354,7 +361,7 @@ void kernel_main() {
                         in1_tensor_current_inner_dim_block_start_tile_id += in1_tensor_next_block_stride;
 
                         // Barrier! make sure the reads are done
-                        noc.async_read_barrier();
+                        dram_noc.read_barrier();
 #elif !defined(IN1_SHARDED)
                         // Operand 1 - accessor-addressed, including DRAM WIDTH/ND shards.
                         dfb_in1.reserve_back(in1_block_num_tiles);
@@ -368,7 +375,7 @@ void kernel_main() {
                             uint32_t in1_tensor_tile_id = in1_tensor_row_start_tile_id;
                             for (uint32_t w = 0; w < in1_block_w; ++w) {
                                 if (bw < num_blocks_w_dim - 1 || w < last_block_w) {
-                                    noc.async_read(
+                                    dram_noc.next().async_read(
                                         s1,
                                         dfb_in1,
                                         in1_single_tile_size_bytes,
@@ -383,7 +390,7 @@ void kernel_main() {
                         in1_tensor_current_inner_dim_block_start_tile_id += in1_tensor_next_block_stride;
 
                         // Barrier! make sure the reads are done
-                        noc.async_read_barrier();
+                        dram_noc.read_barrier();
 #endif  // IN1_DRAM_HEIGHT_SHARDED / IN1_SHARDED
 
 #ifndef SKIP_MCAST
@@ -466,7 +473,7 @@ void kernel_main() {
                         uint32_t in3_tensor_tile_id = in3_tensor_current_w_dim_block_tile_id;
                         for (uint32_t w = 0; w < in1_block_w; ++w) {
                             if (bw < num_blocks_w_dim - 1 || w < last_block_w) {
-                                noc.async_read(
+                                dram_noc.next().async_read(
                                     s3,
                                     dfb_in3,
                                     bias_single_tile_size_bytes,
@@ -478,7 +485,7 @@ void kernel_main() {
                             in3_block_size_bytes += bias_single_tile_size_bytes;
                         }
                         // Barrier! make sure the reads are done
-                        noc.async_read_barrier();
+                        dram_noc.read_barrier();
 
 #ifndef SKIP_MCAST
 
