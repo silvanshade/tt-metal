@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Orthogonal rotation for queries and quantized attention keys."""
 
+import os
 import struct
 from math import prod
 from pathlib import Path
@@ -12,6 +13,17 @@ import ttnn
 
 TILE = 32
 """Side of the device tile, and the width of the stage the rotation factors through."""
+
+
+def _stage_mop():
+    """Whether the compute kernel takes the two-phase Hadamard stage primitive.
+
+    The stage operand is a signed power of two, so only two of the four fidelity
+    phases contribute; the primitive issues exactly those two where the stock
+    matmul issues HiFi3's three. `QWEN_HADAMARD_STAGE_MOP=0` selects the stock
+    path, so the two can be measured against each other without a rebuild.
+    """
+    return os.environ.get("QWEN_HADAMARD_STAGE_MOP", "1") == "1"
 
 
 def _sylvester(order):
@@ -189,7 +201,7 @@ def hadamard_rotate(tensor, stage, dtype=None):
             ttnn.KernelDescriptor(
                 kernel_source=str(kernels / "compute.cpp"),
                 core_ranges=cores,
-                compile_time_args=[*shape_args, _residual_scale(width)],
+                compile_time_args=[*shape_args, _residual_scale(width), int(_stage_mop())],
                 runtime_args=compute_args,
                 # A stage entry is a signed power of two, so its low mantissa half is
                 # zero and the fidelity phases that read it contribute nothing: HiFi3
