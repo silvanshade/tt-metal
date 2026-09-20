@@ -5,46 +5,41 @@
 #include "api/dataflow/dataflow_buffer.h"
 #include "api/tensor/noc_traits.h"
 
-/// Assemble BFP8 faces into whole standard output tiles.
+/// Write each finished output tile to its own page.
 ///
 /// # Specification
-/// - requires: CB16 contains 272-byte faces; CB17 holds four 1088-byte tiles; assigned blocks are disjoint.
-/// - ensures: preserves exponent and mantissa bytes and writes four complete tiles per block.
+/// - requires: CB16 carries `group_tiles` standard output tiles per assigned group.
+/// - ensures: one whole-tile write per output column, at the page its row block owns.
 /// - panics: none.
 ///
 /// # Adequacy
-/// Exponent-scaled and partial-row witnesses distinguish exponent-offset and face-placement faults.
+/// Multi-block and split witnesses distinguish page-addressing faults; a poisoned
+/// destination distinguishes a skipped write from a stale one.
 void kernel_main() {
+    constexpr uint32_t tiles = get_compile_time_arg_val(0);
+    constexpr uint32_t group_tiles = get_compile_time_arg_val(1);
+    constexpr uint32_t split = get_compile_time_arg_val(2);
+    constexpr auto args = TensorAccessorArgs<3>();
     const uint32_t first = get_arg_val<uint32_t>(1);
     const uint32_t count = get_arg_val<uint32_t>(2);
-    constexpr auto args = TensorAccessorArgs<0>();
     const auto destination = TensorAccessor(args, get_arg_val<uint32_t>(0));
+    const uint32_t tile_bytes = get_tile_size(16);
     Noc noc;
-    DataflowBuffer tiles(17);
-    for (uint32_t block = first; block < first + count; ++block) {
-        tiles.reserve_back(4);
-        auto* dst = reinterpret_cast<volatile uint8_t*>(get_write_ptr(17));
-        for (uint32_t row = 0; row < 32; ++row) {
-            cb_wait_front(16, 1);
-            const auto* src = reinterpret_cast<volatile const uint8_t*>(get_read_ptr(16));
-            // Preserve the primitive's BFP8 exponents and mantissas verbatim.
-            // A single face has 16 exponent bytes; a full tile has 64.
-            for (uint32_t chunk = 0; chunk < 8; ++chunk) {
-                const uint32_t tile = (chunk / 2) * 1088;
-                const uint32_t face = (row / 16) * 2 + chunk % 2;
-                dst[tile + face * 16 + row % 16] = src[chunk];
-                for (uint32_t col = 0; col < 16; ++col) {
-                    dst[tile + 64 + face * 256 + (row % 16) * 16 + col] = src[16 + chunk * 16 + col];
-                }
-            }
-            cb_pop_front(16, 1);
-        }
-        tiles.push_back(4);
-        tiles.wait_front(4);
-        for (uint32_t t = 0; t < 4; ++t) {
-            noc.async_write(tiles, destination, 1088, {.offset_bytes = t * 1088}, {.page_id = block * 4 + t});
+    DataflowBuffer results(16);
+
+    for (uint32_t group = first; group < first + count; ++group) {
+        const uint32_t block = group / split;
+        const uint32_t column = (group % split) * group_tiles;
+        results.wait_front(group_tiles);
+        for (uint32_t t = 0; t < group_tiles; ++t) {
+            noc.async_write(
+                results,
+                destination,
+                tile_bytes,
+                {.offset_bytes = t * tile_bytes},
+                {.page_id = block * tiles + column + t});
         }
         noc.async_write_barrier();
-        tiles.pop_front(4);
+        results.pop_front(group_tiles);
     }
 }
