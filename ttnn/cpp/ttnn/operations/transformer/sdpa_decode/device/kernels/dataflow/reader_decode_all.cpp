@@ -222,6 +222,7 @@ void kernel_main() {
     // Read attention sink
     if constexpr (use_attention_sink) {
         const auto attention_sink_reader = TensorAccessor(attention_sink_args, attention_sink_addr);
+        DramReadNoc dram_noc;
 
         CircularBuffer cb_sink(cb_attention_sink);
         cb_sink.reserve_back(PNHt);
@@ -231,7 +232,7 @@ void kernel_main() {
             // Use noc.async_read with explicit size instead of noc.async_read_page because
             // the CB may use half tiles (16x32) while the DRAM buffer stores full tiles (32x32).
             // noc.async_read_page would read buffer->aligned_page_size() bytes, overflowing the CB.
-            noc.async_read(
+            dram_noc.next().async_read(
                 attention_sink_reader,
                 CoreLocalMem<uint32_t>(attention_sink_write_ptr),
                 attention_sink_tile_bytes,
@@ -239,7 +240,7 @@ void kernel_main() {
                 {});
             attention_sink_write_ptr += attention_sink_tile_bytes;
         }
-        noc.async_read_barrier();
+        dram_noc.read_barrier();
         cb_sink.push_back(PNHt);
     }
 

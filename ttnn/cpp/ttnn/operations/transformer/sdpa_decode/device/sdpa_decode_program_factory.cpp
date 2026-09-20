@@ -8,6 +8,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <string>
@@ -23,6 +24,33 @@
 using namespace tt;
 using namespace tt::constants;
 using namespace tt::tt_metal;
+
+namespace {
+
+// Blackhole admits roughly one DRAM read request per 16.4 cycles per endpoint per NoC, so the
+// paged decode reader's per-tile K/V requests stall well below channel bandwidth on one NoC
+// (tenstorrent/tt-metal#55898). Alternating them across both NoCs needs NOC_MODE::DM_DYNAMIC_NOC,
+// which a kernel group takes as a whole, so the writer's descriptor moves with the reader's.
+//
+// Default on for Blackhole. TT_SDPA_DECODE_BOTH_NOC overrides it per call, which is what lets one
+// process run the single-NoC and both-NoC arms against the same input for the bit-identity test;
+// it is deliberately not cached for that reason.
+#ifndef TTNN_SDPA_DECODE_BOTH_NOC
+#define TTNN_SDPA_DECODE_BOTH_NOC 1
+#endif
+
+bool sdpa_decode_both_noc_enabled(tt::ARCH arch) {
+    if (arch != tt::ARCH::BLACKHOLE) {
+        return false;
+    }
+    const char* override_value = std::getenv("TT_SDPA_DECODE_BOTH_NOC");
+    if (override_value != nullptr && override_value[0] != '\0') {
+        return override_value[0] != '0';
+    }
+    return TTNN_SDPA_DECODE_BOTH_NOC != 0;
+}
+
+}  // namespace
 
 namespace ttnn::prim {
 
@@ -778,19 +806,41 @@ ProgramDescriptor SdpaDecodeDeviceOperation::create_descriptor(
     // ========== Kernel Creation ==========
     const std::string kernel_path = "ttnn/cpp/ttnn/operations/transformer/sdpa_decode/device/kernels/";
 
+    // Dedicated mode pins the reader to NOC_0 and the writer to NOC_1; dynamic mode keeps those
+    // as each kernel's own default NoC and lets the reader alternate its DRAM requests onto the
+    // other one. Both descriptors carry the mode because a kernel group may not mix the two.
+    const bool both_noc = sdpa_decode_both_noc_enabled(device->arch());
+
     KernelDescriptor reader_desc;
     reader_desc.kernel_source = kernel_path + "dataflow/reader_decode_all.cpp";
     reader_desc.source_type = KernelDescriptor::SourceType::FILE_PATH;
     reader_desc.core_ranges = core_grid;
     reader_desc.compile_time_args = std::move(reader_compile_time_args_common);
-    reader_desc.config = ReaderConfigDescriptor{};
+    if (both_noc) {
+        reader_desc.defines.emplace_back("DRAM_READ_BOTH_NOC", "1");
+        reader_desc.config = DataMovementConfigDescriptor{
+            .processor = DataMovementProcessor::RISCV_1,
+            .noc = NOC::NOC_0,
+            .noc_mode = NOC_MODE::DM_DYNAMIC_NOC,
+        };
+    } else {
+        reader_desc.config = ReaderConfigDescriptor{};
+    }
 
     KernelDescriptor writer_desc;
     writer_desc.kernel_source = kernel_path + "dataflow/writer_decode_all.cpp";
     writer_desc.source_type = KernelDescriptor::SourceType::FILE_PATH;
     writer_desc.core_ranges = core_grid;
     writer_desc.compile_time_args = std::move(writer_compile_time_args_common);
-    writer_desc.config = WriterConfigDescriptor{};
+    if (both_noc) {
+        writer_desc.config = DataMovementConfigDescriptor{
+            .processor = DataMovementProcessor::RISCV_0,
+            .noc = NOC::NOC_1,
+            .noc_mode = NOC_MODE::DM_DYNAMIC_NOC,
+        };
+    } else {
+        writer_desc.config = WriterConfigDescriptor{};
+    }
 
     KernelDescriptor compute_desc;
     compute_desc.kernel_source = kernel_path + "compute/sdpa_flash_decode.cpp";

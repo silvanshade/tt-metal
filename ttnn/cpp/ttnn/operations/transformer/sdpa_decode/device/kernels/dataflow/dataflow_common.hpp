@@ -14,6 +14,10 @@
 #include "api/tensor/noc_traits.h"
 #include <vector>
 #include "../../../../sdpa/device/kernels/dataflow/dataflow_common.hpp"
+#include "ttnn/cpp/ttnn/kernel_lib/dram_read_noc.hpp"
+
+using dataflow_kernel_lib::DramReadNoc;
+
 /******************************************************************************
  *                                                                             *
  *                   Common Functions for Dataflow Kernels                     *
@@ -182,7 +186,7 @@ uint32_t read_mask_chunk(
     uint32_t mask_chunk_tiles,
     uint32_t mask_start_tile_id,
     const MaskReaderType& mask_reader) {
-    Noc noc;
+    DramReadNoc noc;
     // Read mask chunk
     CircularBuffer cb_mask(cb_mask_in);
     cb_mask.reserve_back(mask_chunk_tiles);
@@ -191,18 +195,18 @@ uint32_t read_mask_chunk(
     for (uint32_t row = 0; row < PNHt; ++row) {
         uint32_t mask_tile_id = mask_start_tile_id + row * PSt;
         for (uint32_t col = 0; col < Sk_chunk_t; ++col) {
-            noc.async_read(
+            noc.next().async_read(
                 mask_reader, CoreLocalMem<uint32_t>(mask_write_ptr), mask_tile_bytes, {.page_id = mask_tile_id}, {});
             mask_tile_id++;
             mask_write_ptr += mask_tile_bytes;
 
             if (++barrier_count == barrier_threshold) {
-                noc.async_read_barrier();
+                noc.read_barrier();
                 barrier_count = 0;
             }
         }
     }
-    noc.async_read_barrier();
+    noc.read_barrier();
     cb_mask.push_back(mask_chunk_tiles);
     // Advance by Sk_chunk_t (column stride), NOT mask_chunk_tiles (PNHt * Sk_chunk_t).
     // The mask tensor has shape (PNHt, St) with row stride PSt. Each chunk advances
@@ -506,7 +510,6 @@ void read_q(
     const QArgsType& q_args,
     uint32_t q_page_size_bytes,
     uint32_t q_batch_offset) {
-    Noc noc;
     CircularBuffer cb_q(cb_q_in);
     CircularBuffer cb_q_rm_buf(cb_q_rm);
     // If Q is locally available (pre-sharded to all cores), just reserve and push
@@ -522,6 +525,7 @@ void read_q(
     }
 
     if constexpr (is_q_sharded) {
+        Noc noc;
         // Q is sharded - read from output core's L1
         const uint8_t noc_id = noc.get_noc_id();
         const uint32_t src_noc_x = is_output_core ? my_x[noc_id] : output_core_noc_x;
@@ -576,17 +580,19 @@ void read_q(
         uint32_t q_write_ptr = cb_q.get_write_ptr();
         uint32_t barrier_count = 0;
 
+        DramReadNoc dram_noc;
         for (uint32_t tile = 0; tile < q_chunk_tiles; ++tile) {
-            noc.async_read(q_reader, CoreLocalMem<uint32_t>(q_write_ptr), q_tile_bytes, {.page_id = q_tile_id}, {});
+            dram_noc.next().async_read(
+                q_reader, CoreLocalMem<uint32_t>(q_write_ptr), q_tile_bytes, {.page_id = q_tile_id}, {});
             q_tile_id += 1;
             q_write_ptr += q_tile_bytes;
 
             if (++barrier_count == barrier_threshold) {
-                noc.async_read_barrier();
+                dram_noc.read_barrier();
                 barrier_count = 0;
             }
         }
-        noc.async_read_barrier();
+        dram_noc.read_barrier();
         cb_q.push_back(q_chunk_tiles);
     }
 }
@@ -622,14 +628,15 @@ uint32_t read_k(
     volatile tt_l1_ptr uint32_t* page_table_ptr_u32,
     uint32_t& barrier_count,
     const KMcastParams& mcast_params = {}) {
-    Noc noc;
     CircularBuffer cb_k(cb_k_in);
     cb_k.reserve_back(k_chunk_tiles);
     uint32_t k_write_ptr = cb_k.get_write_ptr();
     uint32_t k_base_read_ptr = k_write_ptr;
     barrier_count = 0;
+    DramReadNoc dram_noc;
 
     if constexpr (use_mcast) {
+        Noc noc;
         if (mcast_params.do_mcast) {
             for (uint32_t row = 0; row < Sk_chunk_t_dynamic; ++row) {
                 uint32_t k_write_ptr_col = k_write_ptr + row * k_tile_bytes;
@@ -648,7 +655,7 @@ uint32_t read_k(
                                                   DHt,
                                                   capacity_t>(virtual_k_tile_row_num, cur_head, page_table_ptr_u32);
                 for (uint32_t col = 0; col < DHt; ++col) {
-                    noc.async_read(
+                    dram_noc.next().async_read(
                         k_reader,
                         CoreLocalMem<uint32_t>(k_write_ptr_col),
                         k_tile_bytes,
@@ -657,12 +664,12 @@ uint32_t read_k(
                     physical_k_tile_id += 1;
                     k_write_ptr_col += Sk_chunk_t_dynamic * k_tile_bytes;
                     if (++barrier_count == barrier_threshold) {
-                        noc.async_read_barrier();
+                        dram_noc.read_barrier();
                         barrier_count = 0;
                     }
                 }
             }
-            noc.async_read_barrier();
+            dram_noc.read_barrier();
             // Multicast the full K^T chunk to all receiver cores at once
             noc.async_write_multicast(
                 CoreLocalMem<uint32_t>(k_write_ptr),
@@ -711,7 +718,7 @@ uint32_t read_k(
                     : virtual_seq_tile_id_to_physical_tile_id<uint32_t, num_kv_heads, block_size_t, DHt, capacity_t>(
                           virtual_k_tile_row_num, cur_head, page_table_ptr_u32);
             for (uint32_t col = 0; col < DHt; ++col) {
-                noc.async_read(
+                dram_noc.next().async_read(
                     k_reader,
                     CoreLocalMem<uint32_t>(k_write_ptr_col),
                     k_tile_bytes,
@@ -721,12 +728,12 @@ uint32_t read_k(
                 k_write_ptr_col += Sk_chunk_t_dynamic * k_tile_bytes;  // Go to next column in CB
 
                 if (++barrier_count == barrier_threshold) {
-                    noc.async_read_barrier();
+                    dram_noc.read_barrier();
                     barrier_count = 0;
                 }
             }
         }
-        noc.async_read_barrier();
+        dram_noc.read_barrier();
         cb_k.push_back(k_chunk_tiles);
     }
     return k_base_read_ptr;
@@ -754,11 +761,11 @@ void read_v(
     uint32_t& barrier_count,
     uint32_t k_base_read_ptr = 0,
     uint32_t k_tile_bytes = 0) {
-    Noc noc;
     CircularBuffer cb_v(cb_v_in);
     cb_v.reserve_back(v_chunk_tiles);
     uint32_t v_write_ptr = cb_v.get_write_ptr();
     if constexpr (reuse_k) {
+        Noc noc;
         // Read V chunk (transpose of K), from K's L1 buffer (same core)
         const uint8_t noc_id = noc.get_noc_id();
         const uint32_t my_noc_x = my_x[noc_id];
@@ -783,6 +790,7 @@ void read_v(
         // Read V chunk in row major order, write in row-major order
         // V is an independent tensor with its own layout (width = vDHt, not DHt)
         barrier_count = 0;
+        DramReadNoc dram_noc;
         for (uint32_t row = 0; row < Sk_chunk_t_dynamic; ++row) {
             uint32_t virtual_v_tile_row_num = k_chunk_start_row_num + row;
             // Use vDHt for V tensor's width since V is independent
@@ -793,19 +801,19 @@ void read_v(
                     : virtual_seq_tile_id_to_physical_tile_id<uint32_t, num_kv_heads, block_size_t, vDHt, capacity_t>(
                           virtual_v_tile_row_num, cur_head, page_table_ptr_u32);
             for (uint32_t col = 0; col < vDHt; ++col) {
-                noc.async_read(
+                dram_noc.next().async_read(
                     v_reader, CoreLocalMem<uint32_t>(v_write_ptr), v_tile_bytes, {.page_id = physical_v_tile_id}, {});
                 physical_v_tile_id += 1;
                 v_write_ptr += v_tile_bytes;
 
                 if (++barrier_count == barrier_threshold) {
-                    noc.async_read_barrier();
+                    dram_noc.read_barrier();
                     barrier_count = 0;
                 }
             }
             // No padding to skip - V is an independent tensor with contiguous layout
         }
-        noc.async_read_barrier();
+        dram_noc.read_barrier();
     }
     cb_v.push_back(v_chunk_tiles);
 }
@@ -840,12 +848,9 @@ void read_kv_mask_chunks(
     uint32_t k_tile_bytes,
     uint32_t v_tile_bytes,
     uint32_t PSt) {
-    Noc noc;
     CircularBuffer cb_k(cb_k_in);
     CircularBuffer cb_v(cb_v_in);
-    const uint8_t noc_id = noc.get_noc_id();
-    const uint32_t my_noc_x = my_x[noc_id];
-    const uint32_t my_noc_y = my_y[noc_id];
+    DramReadNoc dram_noc;
 
     uint32_t barrier_count = 0;
     for (uint32_t k_chunk = k_chunk_start; k_chunk < k_chunk_end; ++k_chunk) {
@@ -857,16 +862,17 @@ void read_kv_mask_chunks(
         for (uint32_t col = 0; col < DHt; ++col) {
             uint32_t k_tile_id = k_start_tile_id + col;
             for (uint32_t row = 0; row < Sk_chunk_t; ++row) {
-                noc.async_read(k_reader, CoreLocalMem<uint32_t>(k_write_ptr), k_tile_bytes, {.page_id = k_tile_id}, {});
+                dram_noc.next().async_read(
+                    k_reader, CoreLocalMem<uint32_t>(k_write_ptr), k_tile_bytes, {.page_id = k_tile_id}, {});
                 if (++barrier_count == barrier_threshold) {
-                    noc.async_read_barrier();
+                    dram_noc.read_barrier();
                     barrier_count = 0;
                 }
                 k_tile_id += DHt;
                 k_write_ptr += k_tile_bytes;
             }
         }
-        noc.async_read_barrier();
+        dram_noc.read_barrier();
         cb_k.push_back(k_chunk_tiles);
 
         if constexpr (use_attention_mask) {
@@ -876,6 +882,10 @@ void read_kv_mask_chunks(
 
         // Read V chunk (transpose of K), from K's L1 buffer
         if constexpr (reuse_k) {
+            Noc noc;
+            const uint8_t noc_id = noc.get_noc_id();
+            const uint32_t my_noc_x = my_x[noc_id];
+            const uint32_t my_noc_y = my_y[noc_id];
             cb_v.reserve_back(v_chunk_tiles);
             uint32_t v_write_ptr = cb_v.get_write_ptr();
             UnicastEndpoint v_src;
@@ -895,6 +905,7 @@ void read_kv_mask_chunks(
                     k_read_ptr += Sk_chunk_t * k_tile_bytes;  // Strid across K's width
                 }
             }
+            noc.async_read_barrier();
         } else {
             // V is an independent tensor with its own layout (width = vDHt)
             cb_v.reserve_back(v_chunk_tiles);
@@ -903,10 +914,10 @@ void read_kv_mask_chunks(
             uint32_t v_tile_id = v_start_tile_id;
             for (uint32_t row = 0; row < Sk_chunk_t; ++row) {
                 for (uint32_t col = 0; col < vDHt; ++col) {
-                    noc.async_read(
+                    dram_noc.next().async_read(
                         v_reader, CoreLocalMem<uint32_t>(v_write_ptr), v_tile_bytes, {.page_id = v_tile_id}, {});
                     if (++barrier_count == barrier_threshold) {
-                        noc.async_read_barrier();
+                        dram_noc.read_barrier();
                         barrier_count = 0;
                     }
                     v_tile_id++;
@@ -914,8 +925,8 @@ void read_kv_mask_chunks(
                 }
                 // No padding to skip - V is an independent tensor with contiguous layout
             }
+            dram_noc.read_barrier();
         }
-        noc.async_read_barrier();
         cb_v.push_back(v_chunk_tiles);
 
         // Update the starting tile id for next iteration
