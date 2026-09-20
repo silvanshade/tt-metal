@@ -97,9 +97,11 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
             ],
             dim=0,
         )
-        # proj_1d_decode: interleaved weight (fast small-grid 1D decode matmul; prefill AGMM verified
-        # bit-identical on interleaved). Distinct cache suffix.
-        _proj1d = getattr(args, "proj_1d_decode", False)
+        # gdn_qkvzab_1d_decode: interleaved weight (fast small-grid 1D decode matmul; prefill AGMM
+        # verified bit-identical on interleaved). Distinct cache suffix. This shape has its own arm
+        # (QWEN38_QKVZAB_LAYOUT, model_config.DEFAULT_QKVZAB_LAYOUT), so it does not read
+        # proj_1d_decode: under the dram_sharded default it is the one shape that stays interleaved.
+        _proj1d = getattr(args, "gdn_qkvzab_1d_decode", getattr(args, "proj_1d_decode", False))
         tw["qkvz"] = tpc.shard_w(
             fused,
             mesh,
@@ -221,6 +223,10 @@ class TPGatedDeltaNet:
         # Must match load_gdn_weights_tp gates
         self._dram_sharded = getattr(args, "gdn_qkvz_weight_memcfg", None) is not None
         self._fuse_ab = self._dram_sharded
+        # Per-shape decode arm for the fused qkvzab in-projection (QWEN38_QKVZAB_LAYOUT). Must match
+        # the loader gate above: an interleaved weight requires the 1D decode kernel, a WIDTH_SHARDED
+        # one requires the sharded kernel.
+        self._qkvzab_1d_decode = getattr(args, "gdn_qkvzab_1d_decode", getattr(args, "proj_1d_decode", False))
         # Fuse prefill norm-allgather + qkvzab in-proj into all_gather_minimal_matmul_async.
         # Requires the folded qkvzab weight; norm's post-AG is disabled in layer.py (GDN, prefill).
         # Mesh-only: the fused op is a collective, and the (1,1)-mesh batching path (args.tp_path
@@ -375,9 +381,7 @@ class TPGatedDeltaNet:
             selector = torch.zeros(1, 3, T + 3, dtype=torch.float32)
             for j in range(3):
                 selector[:, j, length + j] = 1.0
-            selector_tt = ttnn.from_torch(
-                selector, dtype=qkv.dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh
-            )
+            selector_tt = ttnn.from_torch(selector, dtype=qkv.dtype, layout=ttnn.TILE_LAYOUT, device=self.mesh)
             new_state = ttnn.matmul(selector_tt, padded_tile, memory_config=dram)
             ttnn.deallocate(selector_tt)
             ttnn.deallocate(padded_tile)
@@ -534,8 +538,10 @@ class TPGatedDeltaNet:
                     out_memory_config=_proj_mc,
                 )
                 qkvzab = ttnn.reshape(qkvzab, (1, S, qkvzab.shape[-1]))
-            elif getattr(self.args, "proj_1d_decode", False) and S <= tpc.TILE_SIZE:
-                # Decode: small-grid 1D matmul on the interleaved fused weight (beats the DRAM-sharded grid).
+            elif self._qkvzab_1d_decode and S <= tpc.TILE_SIZE:
+                # Decode: small-grid 1D matmul on the interleaved fused weight. Its own arm, not
+                # proj_1d_decode: the sharded reader for this shape is single-reader (odd tiles per
+                # bank) and measures 165.1 GB/s against 274 on this kernel (model_config).
                 qkvzab = tpc.matmul_1d_decode(
                     x,
                     self.tw["qkvz"],
@@ -652,10 +658,7 @@ class TPGatedDeltaNet:
         ttnn.deallocate(a)
 
         # Fused chunk_gated_delta_rule; also used for masked valid_len.
-        from models.demos.qwen38.tt.gdn.fused_chunk import (
-            chunk_gated_delta_rule_fused_adapter,
-            fused_chunk_enabled,
-        )
+        from models.demos.qwen38.tt.gdn.fused_chunk import chunk_gated_delta_rule_fused_adapter, fused_chunk_enabled
 
         _use_fused = fused_chunk_enabled()
         _delta_fn = chunk_gated_delta_rule_fused_adapter if _use_fused else chunk_gated_delta_rule_seq_adapter
@@ -1072,10 +1075,7 @@ class TPGatedDeltaNet:
 
         # Chunk-parallel recurrence over the BH = B*Nv batch (each row an independent scan). Fused
         # chunk_gated_delta_rule (same op as single-user prefill); per-row valid_lens mask each user.
-        from models.demos.qwen38.tt.gdn.fused_chunk import (
-            chunk_gated_delta_rule_fused_adapter,
-            fused_chunk_enabled,
-        )
+        from models.demos.qwen38.tt.gdn.fused_chunk import chunk_gated_delta_rule_fused_adapter, fused_chunk_enabled
 
         _use_fused = fused_chunk_enabled()
         _delta_fn = chunk_gated_delta_rule_fused_adapter if _use_fused else chunk_gated_delta_rule_seq_adapter
