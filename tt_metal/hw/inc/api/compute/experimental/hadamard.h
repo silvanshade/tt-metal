@@ -42,14 +42,17 @@
 
 #include "api/compute/common.h"
 #include "api/compute/reconfig_data_format.h"
+#include "api/compute/sentinel/compute_kernel_sentinel.h"
 
 // Blackhole-only: the H128 math/unpack LLKs live only in the Blackhole llk_lib.
 #if defined(TRISC_MATH) && defined(ARCH_BLACKHOLE)
 #include "experimental/llk_math_hadamard_api.h"
+#include "experimental/llk_math_hadamard_stage_api.h"
 #endif
 
 #if defined(TRISC_UNPACK) && defined(ARCH_BLACKHOLE)
 #include "experimental/llk_unpack_hadamard_api.h"
+#include "llk_unpack_AB_matmul_api.h"
 #endif
 
 namespace ckernel {
@@ -138,6 +141,58 @@ ALWI void hadamard_h128_tile(
 }
 
 inline void hadamard_h128_uninit() { MATH((llk_math_hadamard_h128_uninit())); }
+
+// clang-format off
+/**
+ * Full initialization for Hadamard stage tiles. Call once at the top of a
+ * kernel, after compute_kernel_hw_startup<SrcOrder::Reverse>(in0, in1, out),
+ * before any hadamard_stage_tile call.
+ *
+ * A stage tile multiply is the stock 32x32 matmul restricted to the two
+ * fidelity phases a signed-power-of-two SrcA operand can contribute to, so it
+ * is exact for a bfloat16 activation at two passes where the cheapest exact
+ * stock fidelity (HiFi3) takes three and the dense H_w matmul takes four. See
+ * llk_math_hadamard_stage.h for the phase derivation.
+ *
+ * | Argument  | Description                                                       | Type     | Valid Range | Required |
+ * |-----------|-------------------------------------------------------------------|----------|-------------|----------|
+ * | in0_cb_id | CB holding the activation tiles (routed to SrcB)                  | uint32_t | 0 to 31     | True     |
+ * | in1_cb_id | CB holding the stage tiles, entries signed powers of two (SrcA)   | uint32_t | 0 to 31     | True     |
+ */
+// clang-format on
+ALWI void hadamard_stage_init(
+    const uint32_t in0_cb_id, const uint32_t in1_cb_id, uint32_t call_line = __builtin_LINE()) {
+    state_configure(in1_cb_id, in0_cb_id, call_line);
+    MATH((llk_math_hadamard_stage_init()));
+    UNPACK((llk_unpack_AB_matmul_init(in0_cb_id, in1_cb_id, 0 /*transpose*/)));
+}
+
+// clang-format off
+/**
+ * Accumulate one Hadamard stage term into the destination tile: DST += A * S,
+ * where A is a whole activation tile and S a whole stage tile. The DST
+ * register must be in the acquired state.
+ *
+ * | Argument       | Description                                              | Type     | Valid Range                                    | Required |
+ * |----------------|----------------------------------------------------------|----------|------------------------------------------------|----------|
+ * | in0_cb_id      | CB holding the activation tiles                          | uint32_t | 0 to 31                                        | True     |
+ * | in1_cb_id      | CB holding the stage tiles                               | uint32_t | 0 to 31                                        | True     |
+ * | in0_tile_index | Index of the activation tile within in0_cb_id            | uint32_t | < CB size                                      | True     |
+ * | in1_tile_index | Index of the stage tile within in1_cb_id                 | uint32_t | < CB size                                      | True     |
+ * | dst_index      | DST register index the term accumulates into             | uint32_t | < acquired DST size                            | True     |
+ */
+// clang-format on
+ALWI void hadamard_stage_tile(
+    const uint32_t in0_cb_id,
+    const uint32_t in1_cb_id,
+    const uint32_t in0_tile_index,
+    const uint32_t in1_tile_index,
+    const uint32_t dst_index) {
+    UNPACK((llk_unpack_AB_matmul(in0_cb_id, in1_cb_id, in0_tile_index, in1_tile_index)));
+    MATH((llk_math_hadamard_stage(dst_index)));
+}
+
+inline void hadamard_stage_uninit() { MATH((llk_math_hadamard_stage_uninit())); }
 
 #endif
 
