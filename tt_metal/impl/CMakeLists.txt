@@ -87,6 +87,8 @@ list(APPEND IMPL_SRC ${PROTO_SRCS})
 # dir is already on this target, so this is the natural home for it.
 list(APPEND IMPL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/internal/disaggregation/kv_chunk_address_table_protobuf.cpp)
 
+find_package(TBB REQUIRED COMPONENTS tbb)
+
 add_library(impl OBJECT ${IMPL_SRC})
 add_library(Metalium::Metal::Impl ALIAS impl)
 
@@ -108,6 +110,7 @@ target_link_libraries(
         common
         Tracy::TracyClient
     PRIVATE
+        TBB::tbb
         FlatBuffers::FlatBuffers
         range-v3::range-v3
         TT::Metalium::Common
