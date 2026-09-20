@@ -11,6 +11,7 @@ poisoned replays separate stale output from recomputation.
 
 import pytest
 import torch
+from loguru import logger
 
 import ttnn
 from models.common.hadamard import HadamardRotation, hadamard_rotate, stage_tiles
@@ -139,8 +140,11 @@ def test_served_shapes_against_the_dense_matmul(ttnn_mesh_device, shape):
     try:
         actual, matmul_result = ttnn.to_torch(result).double(), ttnn.to_torch(served).double()
         expected = _reference(values)
-        for other in (matmul_result, expected):
+        for name, other in (("matmul", matmul_result), ("float64", expected)):
             pcc = torch.corrcoef(torch.stack((actual.flatten(), other.flatten())))[0, 1]
+            logger.info(
+                f"hadamard {tuple(shape)} vs {name}: PCC = {pcc:.8f} max-abs = {(actual - other).abs().max():.6e}"
+            )
             assert pcc > 0.9999
             bound = expected.square().mean(-1, keepdim=True).sqrt() * 0.06
             assert torch.all((actual - other).abs() <= bound)
