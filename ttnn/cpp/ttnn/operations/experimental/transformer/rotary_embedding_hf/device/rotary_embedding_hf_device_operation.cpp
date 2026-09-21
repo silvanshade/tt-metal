@@ -50,7 +50,13 @@ void RotaryEmbeddingHfDeviceOperation::validate_on_program_cache_miss(
     uint32_t X = input_tensor.padded_shape()[-1];
     TT_FATAL(cos.dtype() == sin.dtype(), "Cos and Sin dtypes must match");
     TT_FATAL(cos.padded_shape() == sin.padded_shape(), "Cos and Sin shapes must match");
-    TT_FATAL(cos.padded_shape()[0] == 1 && cos.padded_shape()[-1] == X, "Cos dims must match input dims");
+    TT_FATAL(args.rotary_dim > 0 && args.rotary_dim <= X, "rotary_dim must be in (0, head_dim]");
+    TT_FATAL(args.is_decode_mode || args.rotary_dim == X, "Partial rotary_dim requires decode mode");
+    TT_FATAL(
+        args.rotary_dim == X || args.rotary_dim % (2 * TILE_WIDTH) == 0,
+        "Partial rotary_dim must be divisible by two tile widths");
+    TT_FATAL(cos.padded_shape()[0] == 1 && cos.padded_shape()[-1] == args.rotary_dim,
+             "Cos width must match rotary_dim");
 
     if (args.is_decode_mode) {
         // Decode mode: input [1, batch, num_heads, head_dim], cos/sin [1, batch, 1, head_dim]
@@ -66,6 +72,31 @@ void RotaryEmbeddingHfDeviceOperation::validate_on_program_cache_miss(
         TT_FATAL(sin.padded_shape()[1] == batch_size, "Sin batch dim must match input");
         TT_FATAL(cos.padded_shape()[0] == 1, "Cos seq_len must be 1 in decode mode");
         TT_FATAL(sin.padded_shape()[0] == 1, "Sin seq_len must be 1 in decode mode");
+        if (args.rotary_dim != X) {
+            const auto& input_spec = input_tensor.shard_spec().value();
+            const auto& cos_spec = cos.shard_spec().value();
+            const auto& sin_spec = sin.shard_spec().value();
+            const uint32_t heads = input_tensor.padded_shape()[2];
+            TT_FATAL(input_tensor.logical_shape()[0] == 1, "Decode input must have sequence length one");
+            TT_FATAL(input_spec.shape[1] == X && input_spec.shape[0] % heads == 0,
+                     "Prefix decode requires whole batch rows per shard");
+            const uint32_t batches_per_core = input_spec.shape[0] / heads;
+            TT_FATAL(batches_per_core * input_spec.grid.num_cores() == batch_size,
+                     "Prefix decode requires fully populated batch shards");
+            TT_FATAL(input_tensor.buffer()->buffer_type() == tt::tt_metal::BufferType::L1 &&
+                     cos.buffer()->buffer_type() == tt::tt_metal::BufferType::L1 &&
+                     sin.buffer()->buffer_type() == tt::tt_metal::BufferType::L1,
+                     "Prefix decode requires L1 input and caches");
+            TT_FATAL(args.output_mem_config == input_tensor.memory_config(),
+                     "Prefix decode output must preserve the input memory config");
+            TT_FATAL(cos.memory_config().memory_layout() == tt::tt_metal::TensorMemoryLayout::HEIGHT_SHARDED &&
+                     sin.memory_config().memory_layout() == tt::tt_metal::TensorMemoryLayout::HEIGHT_SHARDED &&
+                     cos_spec == sin_spec && cos_spec.grid == input_spec.grid &&
+                     cos_spec.orientation == input_spec.orientation &&
+                     cos_spec.shape[0] == batches_per_core * TILE_HEIGHT &&
+                     cos_spec.shape[1] == args.rotary_dim && cos.logical_shape()[2] == 1,
+                     "Prefix decode caches must match the input batch shard mapping");
+        }
     } else {
         // Prefill mode: input [1, num_heads, seq_len, head_dim], cos/sin [1, 1, seq_len, head_dim]
         uint32_t seq_len = input_tensor.logical_shape()[-2];
@@ -152,13 +183,15 @@ ttnn::Tensor rotary_embedding_hf(
     const ttnn::Tensor& sin,
     bool is_decode_mode,
     const tt::tt_metal::MemoryConfig& output_mem_config,
-    ttnn::DeviceComputeKernelConfig compute_kernel_config) {
+    ttnn::DeviceComputeKernelConfig compute_kernel_config,
+    uint32_t rotary_dim) {
     using OperationType = ttnn::experimental::prim::RotaryEmbeddingHfDeviceOperation;
 
     auto operation_attributes = OperationType::operation_attributes_t{
         .is_decode_mode = is_decode_mode,
         .output_mem_config = output_mem_config,
         .compute_kernel_config = compute_kernel_config,
+        .rotary_dim = rotary_dim,
     };
     auto tensor_args = OperationType::tensor_args_t{.input_tensor = input, .cos_cache = cos, .sin_cache = sin};
 

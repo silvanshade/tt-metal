@@ -46,6 +46,10 @@ void bind_rotary_embedding_hf(nb::module_& mod) {
                 If ``None`` (default), the op uses ``init_device_compute_kernel_config`` with
                 ``math_fidelity=HiFi4``, ``math_approx_mode=True``, ``fp32_dest_acc_en=False``,
                 ``packer_l1_acc=False``, and ``dst_full_sync_en=False``.
+            rotary_dim (Optional[int]): Width of the rotated prefix. Defaults to the full padded
+                head dimension. Partial prefixes require decode mode and a positive multiple
+                of 64 not exceeding head_dim. Cos/sin width must equal rotary_dim; the remaining
+                input columns are copied unchanged.
 
         Returns:
             ttnn.Tensor: Output tensor with rotary embedding applied
@@ -70,7 +74,8 @@ void bind_rotary_embedding_hf(nb::module_& mod) {
         nb::kw_only(),
         nb::arg("is_decode_mode") = false,
         nb::arg("memory_config") = nb::none(),
-        nb::arg("compute_kernel_config") = nb::none());
+        nb::arg("compute_kernel_config") = nb::none(),
+        nb::arg("rotary_dim") = nb::none());
 }
 
 }  // namespace ttnn::operations::experimental::transformer

@@ -14,7 +14,8 @@ ttnn::Tensor rotary_embedding_hf(
     const ttnn::Tensor& sin,
     bool is_decode_mode,
     const tt::tt_metal::MemoryConfig& output_mem_config,
-    ttnn::DeviceComputeKernelConfig compute_kernel_config);
+    ttnn::DeviceComputeKernelConfig compute_kernel_config,
+    uint32_t rotary_dim);
 
 }  // namespace ttnn::prim
 
@@ -26,7 +27,8 @@ Tensor rotary_embedding_hf(
     const Tensor& sin_cache,
     const bool is_decode_mode,
     const std::optional<MemoryConfig>& memory_config,
-    std::optional<const ttnn::DeviceComputeKernelConfig> compute_kernel_config) {
+    std::optional<const ttnn::DeviceComputeKernelConfig> compute_kernel_config,
+    std::optional<uint32_t> rotary_dim) {
     // Device-only op: kernel config needs arch() and the primitive enqueues on device.
     TT_FATAL(
         input_tensor.storage_type() == StorageType::DEVICE,
@@ -47,7 +49,8 @@ Tensor rotary_embedding_hf(
         arch, compute_kernel_config, tt::tt_metal::MathFidelity::HiFi4, true, false, false);
 
     return ttnn::prim::rotary_embedding_hf(
-        input_tensor, cos_cache, sin_cache, is_decode_mode, output_mem_config, kernel_config);
+        input_tensor, cos_cache, sin_cache, is_decode_mode, output_mem_config, kernel_config,
+        rotary_dim.value_or(input_tensor.padded_shape()[-1]));
 }
 
 }  // namespace ttnn::experimental
