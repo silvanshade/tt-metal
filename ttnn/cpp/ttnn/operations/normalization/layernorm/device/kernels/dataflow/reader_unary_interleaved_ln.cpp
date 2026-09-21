@@ -153,7 +153,19 @@ void kernel_main() {
         // TILE: read input a and b (if present) interleaved per block.
         for (auto block : generic::blocks(Wt, block_size)) {
             const uint32_t flat_offset = (curr_tile_row * Wt) + block.start();
+#ifdef HEIGHT_SHARDED_DUAL_NOC
+            Noc nocs[2] = {Noc(0), Noc(1)};
+            dfb_in0.reserve_back(block.full_block_size());
+            for (auto i : block.local()) {
+                nocs[i & 1].async_read(src_a, dfb_in0, src0_page_bytes,
+                                       {.page_id = flat_offset + i}, {.offset_bytes = i * src0_page_bytes});
+            }
+            nocs[0].async_read_barrier();
+            nocs[1].async_read_barrier();
+            dfb_in0.push_back(block.full_block_size());
+#else
             layernorm_dataflow_utils::read_block_to_dfb(noc, dfb_in0, src_a, src0_page_bytes, flat_offset, block);
+#endif
 #ifdef FUSE_PRE_ADD
             layernorm_dataflow_utils::read_block_to_dfb(noc, dfb_in1, src_b, src1_tile_bytes, flat_offset, block);
 #else
