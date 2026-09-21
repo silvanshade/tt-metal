@@ -237,29 +237,26 @@ ProgramDescriptor create_multi_tile_decode_descriptor(
     bool in_sharded = input.shard_spec().has_value();
     std::optional<ShardSpec> shard_spec = in_sharded ? input.shard_spec() : output.shard_spec();
 
-    const uint32_t batch = input.padded_shape()[1];
+
     const uint32_t n_heads_t = shard_spec->shape[0] / constants::TILE_HEIGHT;
     const uint32_t n_heads_per_batch_t = input.padded_shape()[2] / constants::TILE_HEIGHT;
     const uint32_t head_dim_t = shard_spec->shape[1] / constants::TILE_WIDTH;
+    const uint32_t rotary_dim_t = operation_attributes.rotary_dim / constants::TILE_WIDTH;
 
     tt_metal::distributed::MeshDevice* device = input.device();
 
     auto [math_fidelity, math_approx_mode, fp32_dest_acc_en, packer_l1_acc, dst_full_sync_en] =
         get_compute_kernel_config_args(device->arch(), operation_attributes.compute_kernel_config);
 
-    CoreRange all_cores = shard_spec->grid.bounding_box();
-    uint32_t num_cores_x = all_cores.grid_size().x;
-    uint32_t num_cores_y = all_cores.grid_size().y;
+    const CoreRangeSet& all_cores = shard_spec->grid;
 
     const uint32_t num_input_tiles = n_heads_t * head_dim_t;
     const uint32_t num_output_tiles = num_input_tiles;
 
-    const uint32_t num_cores = num_cores_x * num_cores_y;
-    const uint32_t batch_parallel_factor = std::min(batch, num_cores);
-    const uint32_t batch_per_core = (batch + batch_parallel_factor - 1) / batch_parallel_factor;
+    const uint32_t batch_per_core = n_heads_t / n_heads_per_batch_t;
 
     const uint32_t num_sin_cos_rows_per_core = batch_per_core;
-    uint32_t num_cos_sin_tiles = head_dim_t * num_sin_cos_rows_per_core;
+    uint32_t num_cos_sin_tiles = rotary_dim_t * num_sin_cos_rows_per_core;
 
     auto* src_buffer = input.buffer();
     auto* cos_buffer = cos.buffer();
@@ -314,7 +311,7 @@ ProgramDescriptor create_multi_tile_decode_descriptor(
         }}},
     });
 
-    uint32_t num_interm_tiles = head_dim_t;
+    uint32_t num_interm_tiles = rotary_dim_t;
     constexpr uint8_t rotated_input_interm_cb_index = CBIndex::c_24;
     desc.cbs.push_back(CBDescriptor{
         .total_size = num_interm_tiles * input_single_tile_size,
@@ -373,6 +370,7 @@ ProgramDescriptor create_multi_tile_decode_descriptor(
         (std::uint32_t)n_heads_t,
         (std::uint32_t)n_heads_per_batch_t,
         (std::uint32_t)batch_per_core,
+        rotary_dim_t,
     };
 
     KernelDescriptor compute_desc;

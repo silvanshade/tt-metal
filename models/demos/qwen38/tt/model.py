@@ -17,6 +17,7 @@ from tqdm import tqdm
 import ttnn
 from models.common.hadamard import HadamardRotation
 from models.common.rmsnorm import RMSNorm
+from models.demos.qwen38.tt.attention.rope_tp import stage_decode_rope
 from models.demos.qwen38.tt.layer import Qwen38DecoderLayer
 from models.demos.qwen38.tt.model_config import Qwen38ModelArgs
 from models.demos.qwen38.tt.rope import Qwen38RoPESetup
@@ -965,11 +966,15 @@ class Qwen38Model:
         if self.tp_path:
             # TP expects [1,1,B,dim_frac]; embd yields [B,1,dim_frac].
             x = ttnn.reshape(x, (1, 1, x.shape[0] * x.shape[1], x.shape[-1]))
+            cos, sin = stage_decode_rope(self.device, cos, sin)
         for layer in self.layers:
             if layer.is_full_attention:
                 x = layer.forward(x, cos, sin, position_tensor=cur_pos_tensor, page_table=page_table, mode="decode")
             else:
                 x = layer.forward(x, mode="decode")
+        if self.tp_path:
+            ttnn.deallocate(cos)
+            ttnn.deallocate(sin)
         x = self._final_norm_decode(x)
         if sharded_lm_head or self._ondev_argmax:
             # Pre-gather vocab-sharded logits (on-device sampling / greedy argmax).

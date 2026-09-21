@@ -34,7 +34,6 @@ from models.demos.qwen38.tests.test_factory import (
     replicate_to_device,
 )
 from models.demos.qwen38.tt.attention.rope_tp import (
-    apply_partial_rope_decode,
     apply_partial_rope_prefill,
     rot_mats_decode,
     rot_mats_prefill,
@@ -103,7 +102,7 @@ def test_partial_rope_prefill(mesh_device, reset_seeds, ensure_gc, request):
 @torch.no_grad()
 @parametrize_mesh_tp()
 def test_partial_rope_decode(mesh_device, reset_seeds, ensure_gc, request):
-    """Decode partial-RoPE: per-user positions. TTNN apply_partial_rope_decode vs HF reference."""
+    """Native decode prefix rotation at distinct per-user positions vs HF reference."""
     from transformers.models.qwen3_5.modeling_qwen3_5 import apply_rotary_pos_emb
 
     B = 8
@@ -116,8 +115,19 @@ def test_partial_rope_decode(mesh_device, reset_seeds, ensure_gc, request):
 
     # ---- TTNN (demo path) ----
     cos_tt, sin_tt = rot_mats_decode(mesh_device, rope_dim, 256, theta, positions)
-    q_tt = apply_partial_rope_decode(replicate_to_device(mesh_device, q), cos_tt, sin_tt, NH, B, rope_dim)
-    k_tt = apply_partial_rope_decode(replicate_to_device(mesh_device, k), cos_tt, sin_tt, NKV, B, rope_dim)
+    grid = cos_tt.memory_config().shard_spec.grid
+    memory = ttnn.MemoryConfig(
+        ttnn.TensorMemoryLayout.HEIGHT_SHARDED, ttnn.BufferType.L1,
+        ttnn.ShardSpec(grid, [ttnn.TILE_SIZE, HD], ttnn.ShardOrientation.ROW_MAJOR),
+    )
+    q_sh = ttnn.to_memory_config(replicate_to_device(mesh_device, q), memory)
+    k_sh = ttnn.to_memory_config(replicate_to_device(mesh_device, k), memory)
+    q_tt = ttnn.experimental.rotary_embedding_hf(
+        q_sh, cos_tt, sin_tt, is_decode_mode=True, rotary_dim=rope_dim, memory_config=memory,
+    )
+    k_tt = ttnn.experimental.rotary_embedding_hf(
+        k_sh, cos_tt, sin_tt, is_decode_mode=True, rotary_dim=rope_dim, memory_config=memory,
+    )
     q_out, k_out = _read0(mesh_device, q_tt), _read0(mesh_device, k_tt)
 
     # ---- torch reference (per-user positions, heads in dim 2 -> unsqueeze_dim=2) ----

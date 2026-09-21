@@ -29,7 +29,8 @@ void kernel_main() {
     constexpr uint32_t Ht = get_compile_time_arg_val(9);  // Total rows (tiles) owned by this core
     constexpr uint32_t heads_per_batch_t = get_compile_time_arg_val(10);
     constexpr uint32_t batch_per_core = get_compile_time_arg_val(11);
-    constexpr uint32_t half_Wt = Wt / 2;
+    constexpr uint32_t rotary_Wt = get_compile_time_arg_val(12);
+    constexpr uint32_t half_Wt = rotary_Wt / 2;
     (void)Ht;
     constexpr auto bulk_block_input = [](uint32_t cb_id) {
         return ckl::input(
@@ -54,7 +55,7 @@ void kernel_main() {
     constexpr auto in_input = ckl::input(
         in_cb_id,
         ckl::WaitPolicy::None,
-        ckl::PopPolicy::AtEnd,
+        ckl::PopPolicy::None,
         ckl::InputTileMapping::Block,
         ckl::DataFormatReconfig::Disabled);
     constexpr auto sin_input = held_block_input(sin_cb_id);
@@ -63,7 +64,8 @@ void kernel_main() {
     constexpr auto cos_interm_input = bulk_block_input(cos_interm_cb_id);
     constexpr auto sin_output = bulk_output(sin_interm_cb_id);
     constexpr auto cos_output = bulk_output(cos_interm_cb_id);
-    constexpr auto rotary_output = bulk_output(out_cb_id);
+    constexpr auto rotary_output =
+        ckl::output(out_cb_id, ckl::ReservePolicy::None, ckl::PushPolicy::None, ckl::DataFormatReconfig::Disabled);
 
     CircularBuffer in_cb(in_cb_id);
     CircularBuffer cos_cb(cos_cb_id);
@@ -84,15 +86,15 @@ void kernel_main() {
     for (uint32_t batch_idx = 0; batch_idx < batch_per_core; ++batch_idx) {
         // For decode mode, cos/sin are [1, batch, 1, head_dim] and this core's shard
         // may contain multiple batch rows. Push one row at a time and advance the CB.
-        sin_cb.reserve_back(Wt);
-        cos_cb.reserve_back(Wt);
-        sin_cb.push_back(Wt);
-        cos_cb.push_back(Wt);
+        sin_cb.reserve_back(rotary_Wt);
+        cos_cb.reserve_back(rotary_Wt);
+        sin_cb.push_back(rotary_Wt);
+        cos_cb.push_back(rotary_Wt);
 
         for (uint32_t ht = 0; ht < heads_per_batch_t; ++ht) {
-            rotated_in_interm_cb.reserve_back(Wt);
-            sin_interm_cb.reserve_back(Wt);
-            cos_interm_cb.reserve_back(Wt);
+            rotated_in_interm_cb.reserve_back(rotary_Wt);
+            sin_interm_cb.reserve_back(rotary_Wt);
+            cos_interm_cb.reserve_back(rotary_Wt);
             out_cb.reserve_back(Wt);
 
             // Get the input
@@ -138,7 +140,7 @@ void kernel_main() {
                         ckl::DataFormatReconfig::Enabled,
                         ckl::TileAddressing::Offset),
                     ckl::Dst::D1>{half_Wt});
-            rotated_in_interm_cb.push_back(Wt);
+            rotated_in_interm_cb.push_back(rotary_Wt);
 
             // sin_interim = rotated * sin (broadcast rows)
             // Restore both operands after the scalar-multiply/copy chain; the trig caches and
@@ -147,14 +149,14 @@ void kernel_main() {
             pack_reconfig_data_format(rotated_in_interm_cb_id, sin_interm_cb_id);
             mul_bcast_rows_init(rotated_in_interm_cb_id, sin_cb_id);
             ckl::eltwise_chain<ckl::InitReconfigOwner::Caller>(
-                ckl::IterationShape::tiles(Wt).block_size(/*block_size=*/Wt),
+                ckl::IterationShape::tiles(rotary_Wt).block_size(/*block_size=*/rotary_Wt),
                 ckl::BinaryFpu<ckl::BinaryFpuOp::Mul, rotated_input, ckl::input(sin_input, ckl::BroadcastDim::Row)>{},
                 ckl::PackTile<sin_output>{});
 
             reconfig_data_format(rotated_in_interm_cb_id, in_cb_id, sin_cb_id, cos_cb_id);
             pack_reconfig_data_format(sin_interm_cb_id, cos_interm_cb_id);
             ckl::eltwise_chain<ckl::InitReconfigOwner::Caller>(
-                ckl::IterationShape::tiles(Wt).block_size(/*block_size=*/Wt),
+                ckl::IterationShape::tiles(rotary_Wt).block_size(/*block_size=*/rotary_Wt),
                 ckl::BinaryFpu<ckl::BinaryFpuOp::Mul, in_input, ckl::input(cos_input, ckl::BroadcastDim::Row)>{},
                 ckl::PackTile<cos_output>{});
 
@@ -162,11 +164,25 @@ void kernel_main() {
             reconfig_data_format(in_cb_id, cos_interm_cb_id, cos_cb_id, sin_interm_cb_id);
             pack_reconfig_data_format(cos_interm_cb_id, out_cb_id);
             ckl::add<cos_interm_input, sin_interm_input, rotary_output>(
-                ckl::IterationShape::tiles(Wt).block_size(/*block_size=*/Wt));
+                ckl::IterationShape::tiles(rotary_Wt).block_size(/*block_size=*/rotary_Wt));
+            // Copy the unrotated suffix after the CKL chains while the input is still live.
+            if constexpr (rotary_Wt < Wt) {
+                copy_tile_init_with_dt(in_cb_id);
+                for (uint32_t j = rotary_Wt; j < Wt; ++j) {
+                    tile_regs_acquire();
+                    copy_tile(in_cb_id, j, 0);
+                    tile_regs_commit();
+                    tile_regs_wait();
+                    pack_tile(0, out_cb_id, j);
+                    tile_regs_release();
+                }
+            }
+            in_cb.pop_front(Wt);
+            out_cb.push_back(Wt);
         }
 
-        sin_cb.pop_front(Wt);
-        cos_cb.pop_front(Wt);
+        sin_cb.pop_front(rotary_Wt);
+        cos_cb.pop_front(rotary_Wt);
     }
 
     // Done with the scalar, so remove from CB

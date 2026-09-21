@@ -250,11 +250,22 @@ def apply_interleaved_mrope(freqs, mrope_section):
     return freqs_t
 
 
+def stage_decode_rope(device, cos, sin):
+    """Shard each cache once per step; all layers and Q/K share the returned tensors."""
+    grid = ttnn.num_cores_to_corerangeset(cos.shape[1], device.compute_with_storage_grid_size(), row_wise=True)
+    memory_config = ttnn.MemoryConfig(
+        ttnn.TensorMemoryLayout.HEIGHT_SHARDED,
+        ttnn.BufferType.L1,
+        ttnn.ShardSpec(grid, [ttnn.TILE_SIZE, cos.shape[-1]], ttnn.ShardOrientation.ROW_MAJOR),
+    )
+    return ttnn.to_memory_config(cos, memory_config), ttnn.to_memory_config(sin, memory_config)
+
+
 def rot_mats_decode(device, rope_dim, max_seq_len, theta, positions, rope_scaling=None):
     """Return [cos, sin] each [1, B, 1, rope_dim] for the given per-user positions.
 
-    positions: torch.Tensor [B] of int positions. Built on host (small) then
-    replicated to the mesh — matches apply_partial_rope_decode's expected layout.
+    positions: torch.Tensor [B] of int positions. Built on host (small), replicated
+    to the mesh, then height-sharded once for all layers and both Q/K.
     rope_scaling: HF ``rope_parameters`` (see ``rope_inv_freq``); None is plain RoPE.
     """
     inv_freq, scale = rope_inv_freq(rope_dim, theta, rope_scaling)
@@ -270,7 +281,10 @@ def rot_mats_decode(device, rope_dim, max_seq_len, theta, positions, rope_scalin
     sin_tt = ttnn.from_torch(
         sin, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device, mesh_mapper=ttnn.ReplicateTensorToMesh(device)
     )
-    return cos_tt, sin_tt
+    staged_cos, staged_sin = stage_decode_rope(device, cos_tt, sin_tt)
+    ttnn.deallocate(cos_tt)
+    ttnn.deallocate(sin_tt)
+    return staged_cos, staged_sin
 
 
 def rot_mats_prefill(device, rope_dim, seq_len, theta, position_ids=None, mrope_section=None, rope_scaling=None):
@@ -306,40 +320,6 @@ def rot_mats_prefill(device, rope_dim, seq_len, theta, position_ids=None, mrope_
         mesh_mapper=ttnn.ReplicateTensorToMesh(device),
     )
     return cos, sin
-
-
-def apply_partial_rope_decode(x, cos_tt, sin_tt, n_heads, batch_size, rope_dim):
-    """x: [1, B, n_heads, HD]; cos/sin: [1, B, 1, rope_dim]; rotates first rope_dim dims.
-
-    Fused HF-convention rotate-half via ttnn.experimental.rotary_embedding_hf. The op's native
-    decode mode (is_decode_mode=True) hard-requires HEIGHT_SHARDED input + cos/sin, but qwen38's
-    decode attention runs interleaved (q/k are sharded_to_interleaved right after head-split). To
-    avoid the reshards that sharding would add, transpose the interleaved tensor to a prefill-shaped
-    [1, n_heads, B, rope_dim] (batch plays the seq role) and use the interleaved-friendly prefill
-    mode (is_decode_mode=False), then transpose back. Partial: only the first rope_dim is rotated;
-    the tail passes through.
-    """
-    hd = x.shape[-1]
-    B = batch_size
-    x_rope = ttnn.slice(x, (0, 0, 0, 0), (1, B, n_heads, rope_dim))
-    x_rope_t = ttnn.transpose(x_rope, 1, 2)  # [1, n_heads, B, rope_dim]
-    ttnn.deallocate(x_rope)
-    # decode cos/sin [1, B, 1, rope_dim] -> prefill [1, 1, B, rope_dim] (broadcast over heads)
-    cos_p = ttnn.reshape(cos_tt, (1, 1, B, rope_dim))
-    sin_p = ttnn.reshape(sin_tt, (1, 1, B, rope_dim))
-    roped_t = ttnn.experimental.rotary_embedding_hf(
-        x_rope_t, cos_p, sin_p, is_decode_mode=False, memory_config=ttnn.DRAM_MEMORY_CONFIG
-    )
-    ttnn.deallocate(x_rope_t)
-    roped = ttnn.to_memory_config(ttnn.transpose(roped_t, 1, 2), ttnn.DRAM_MEMORY_CONFIG)
-    ttnn.deallocate(roped_t)
-    if rope_dim == hd:
-        return roped
-    x_pass = ttnn.to_memory_config(ttnn.slice(x, (0, 0, 0, rope_dim), (1, B, n_heads, hd)), ttnn.DRAM_MEMORY_CONFIG)
-    result = ttnn.concat([roped, x_pass], dim=-1)
-    ttnn.deallocate(roped)
-    ttnn.deallocate(x_pass)
-    return result
 
 
 def apply_partial_rope_prefill(x, cos_tt, sin_tt, n_heads, rope_dim):

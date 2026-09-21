@@ -14,6 +14,7 @@ struct RotaryEmbeddingHfParams {
     bool is_decode_mode;
     tt::tt_metal::MemoryConfig output_mem_config;
     ttnn::DeviceComputeKernelConfig compute_kernel_config;
+    uint32_t rotary_dim;
 };
 
 struct RotaryEmbeddingHfInputs {
