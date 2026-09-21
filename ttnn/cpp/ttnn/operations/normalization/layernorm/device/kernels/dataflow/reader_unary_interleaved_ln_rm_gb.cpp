@@ -23,6 +23,9 @@ void kernel_main() {
     const uint32_t tile_offset = get_arg(args::reader_start);
 
     const Noc noc;
+#ifdef HEIGHT_SHARDED_DUAL_NOC
+    const Noc nocs[2] = {Noc(0), Noc(1)};
+#endif
     DataflowBuffer dfb_in0(dfb::in);
     // Welford-fp32 alias of dfb_in (non-fused) or dfb_x (fused). Shares SRAM with the
     // primary buffer but has its own read/write pointers, so we must push_back on it whenever we
@@ -106,7 +109,12 @@ void kernel_main() {
             dfb_in0.reserve_back(static_cast<uint16_t>(block.full_block_size()));
             uint32_t idx = 0;
             for (auto r : block.local()) {
-                noc.async_read(
+#ifdef HEIGHT_SHARDED_DUAL_NOC
+                const auto& input_noc = nocs[r & 1];
+#else
+                const auto& input_noc = noc;
+#endif
+                input_noc.async_read(
                     src_a,
                     dfb_in0,
                     src0_tile_bytes,
@@ -114,7 +122,12 @@ void kernel_main() {
                     {.offset_bytes = idx * src0_tile_bytes});
                 idx++;
             }
+#ifdef HEIGHT_SHARDED_DUAL_NOC
+            nocs[0].async_read_barrier();
+            nocs[1].async_read_barrier();
+#else
             noc.async_read_barrier();
+#endif
             dfb_in0.push_back(static_cast<uint16_t>(block.full_block_size()));
 
 #ifdef FUSE_PRE_ADD

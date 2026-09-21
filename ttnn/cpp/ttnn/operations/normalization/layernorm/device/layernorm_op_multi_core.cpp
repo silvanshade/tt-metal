@@ -275,8 +275,11 @@ ttnn::device_operation::ProgramArtifacts LayerNormMultiCoreProgramFactory::creat
 
     uint32_t num_tile_rows = NC * Ht;
 
-    // The caller may restrict the program to a subset of the grid; otherwise take the whole of it.
-    CoreRangeSet requested_cores = core_range_set.has_value() ? core_range_set.value() : default_core_range(*device);
+    const bool height_sharded = a.memory_config().memory_layout() == TensorMemoryLayout::HEIGHT_SHARDED;
+    const bool row_wise = !height_sharded || a.shard_spec()->orientation == ShardOrientation::ROW_MAJOR;
+    CoreRangeSet requested_cores = height_sharded
+                                       ? a.shard_spec()->grid
+                                       : core_range_set.value_or(default_core_range(*device));
 
     // Use split_work_to_cores to properly distribute tile rows across available cores
     auto
@@ -285,7 +288,7 @@ ttnn::device_operation::ProgramArtifacts LayerNormMultiCoreProgramFactory::creat
          core_group_1,
          core_group_2,
          num_tile_rows_per_core_group_1,
-         num_tile_rows_per_core_group_2] = split_work_to_cores(requested_cores, num_tile_rows, true /* row_wise */);
+         num_tile_rows_per_core_group_2] = split_work_to_cores(requested_cores, num_tile_rows, row_wise);
 
     // Use passed-in reciprocal LUT tensor if using Welford
     std::optional<Tensor> recip_tensor = std::nullopt;
@@ -552,7 +555,9 @@ ttnn::device_operation::ProgramArtifacts LayerNormMultiCoreProgramFactory::creat
 
     // gamma/beta streaming intermediate.
     if (gamma.has_value() || beta.has_value()) {
-        add_dfb(FUSION, im5_t, single_tile_size, interm_data_format);
+        // Match the standalone BF16 RMSNorm output before applying the weight.
+        const auto fusion_format = height_sharded ? out_data_format : interm_data_format;
+        add_dfb(FUSION, im5_t, tt::tile_size(fusion_format), fusion_format);
     }
 
     if (gamma.has_value()) {
@@ -932,7 +937,7 @@ ttnn::device_operation::ProgramArtifacts LayerNormMultiCoreProgramFactory::creat
     m2::KernelRunArgs compute_run_args{.kernel = COMPUTE};
 
     uint32_t curr_row = 0;
-    auto all_core_coords = corerange_to_cores(all_cores, num_cores, true);
+    auto all_core_coords = corerange_to_cores(all_cores, num_cores, row_wise);
     for (uint32_t i = 0; i < num_cores; ++i) {
         CoreCoord core = all_core_coords[i];
 
@@ -978,6 +983,14 @@ ttnn::device_operation::ProgramArtifacts LayerNormMultiCoreProgramFactory::creat
         m2::AddRuntimeArgsForNode(compute_run_args.runtime_arg_values, core, {{"NCHt", num_tile_rows_per_core}});
 
         curr_row += num_tile_rows_per_core;
+    }
+
+    if (height_sharded && device->arch() != tt::ARCH::QUASAR) {
+        reader.compiler_options.defines.emplace("HEIGHT_SHARDED_DUAL_NOC", "1");
+        std::get<m2::DataMovementGen1Config>(std::get<m2::DataMovementHardwareConfig>(reader.hw_config)).noc_mode =
+            NOC_MODE::DM_DYNAMIC_NOC;
+        std::get<m2::DataMovementGen1Config>(std::get<m2::DataMovementHardwareConfig>(writer.hw_config)).noc_mode =
+            NOC_MODE::DM_DYNAMIC_NOC;
     }
 
     ////////////////////////////////////////////////////////////////////////////

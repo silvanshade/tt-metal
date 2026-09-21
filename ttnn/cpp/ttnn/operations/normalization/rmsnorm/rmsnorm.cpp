@@ -68,7 +68,9 @@ Tensor rms_norm(
         residual_input_tensor,
         output_memory_config,
         program_config.value_or(ttnn::prim::create_layernorm_program_config(
-            input_tensor.shard_spec(),
+            input_tensor.memory_config().memory_layout() == TensorMemoryLayout::HEIGHT_SHARDED
+                ? std::nullopt
+                : input_tensor.shard_spec(),
             input_tensor.tensor_spec().tile().get_height(),
             input_tensor.tensor_spec().tile().get_width())),
         kernel_config_val,

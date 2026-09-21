@@ -152,6 +152,32 @@ def test_served_shapes_against_the_dense_matmul(ttnn_mesh_device, shape):
         for tensor in (served, served_input, dense, result, stage, source):
             ttnn.deallocate(tensor)
 
+@pytest.mark.parametrize("batch", [1, 6])
+def test_head_split_shards_match_interleaved(ttnn_mesh_device, batch):
+    """Shard addressing must preserve every Q/K head across batch-core boundaries."""
+    values = torch.randn((1, 1, batch, 8192), generator=torch.Generator().manual_seed(450)).bfloat16()
+    source = ttnn.from_torch(
+        values, device=ttnn_mesh_device, dtype=ttnn.bfloat16,
+        layout=ttnn.TILE_LAYOUT, memory_config=ttnn.L1_MEMORY_CONFIG,
+    )
+    stage = stage_tiles(ttnn_mesh_device, 256)
+    q, k, v = ttnn.experimental.nlp_create_qkv_heads_decode(source, num_heads=24, num_kv_heads=4)
+    try:
+        for sharded in (q, k):
+            interleaved = ttnn.to_memory_config(sharded, ttnn.L1_MEMORY_CONFIG)
+            reference = hadamard_rotate(interleaved, stage)
+            candidate = hadamard_rotate(sharded, stage)
+            gathered = ttnn.to_memory_config(candidate, ttnn.L1_MEMORY_CONFIG)
+            try:
+                assert candidate.memory_config() == sharded.memory_config()
+                assert torch.equal(ttnn.to_torch(gathered).view(torch.int16), ttnn.to_torch(reference).view(torch.int16))
+            finally:
+                for tensor in (gathered, candidate, reference, interleaved):
+                    ttnn.deallocate(tensor)
+    finally:
+        for tensor in (q, k, v, stage, source):
+            ttnn.deallocate(tensor)
+
 
 def test_trace_replay_and_following_sfpu(ttnn_mesh_device):
     """A replayed program must recompute its output, and leave the next SFPU op intact."""

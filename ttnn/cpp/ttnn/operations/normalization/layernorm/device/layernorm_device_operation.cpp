@@ -17,7 +17,8 @@ namespace ttnn::prim {
 
 LayerNormDeviceOperation::program_factory_t LayerNormDeviceOperation::select_program_factory(
     const operation_attributes_t& /*operation_attributes*/, const tensor_args_t& tensor_args) {
-    if (tensor_args.input.is_sharded()) {
+    if (tensor_args.input.is_sharded() &&
+        tensor_args.input.memory_config().memory_layout() != TensorMemoryLayout::HEIGHT_SHARDED) {
         return LayerNormShardedProgramFactory{};
     }
     return LayerNormMultiCoreProgramFactory{};
@@ -160,8 +161,29 @@ void LayerNormDeviceOperation::validate_on_program_cache_miss(
                 beta.value().dtype());
         }
     }
-    if (a.is_sharded()) {
-        // TODO: Add support for this (should be similar to interleaved)
+    if (a.memory_config().memory_layout() == TensorMemoryLayout::HEIGHT_SHARDED) {
+        TT_FATAL(operation_attributes.norm_type == LayerNormType::RMSNORM, "Height sharding requires RMSNorm");
+        TT_FATAL(
+            operation_attributes.distributed_norm_stage == DistributedLayerNormStage::NOT_DISTRIBUTED,
+            "Height-sharded RMSNorm does not support distributed reduction");
+        TT_FATAL(
+            std::holds_alternative<LayerNormDefaultProgramConfig>(operation_attributes.program_config),
+            "Height-sharded RMSNorm requires LayerNormDefaultProgramConfig");
+        TT_FATAL(a.dtype() == DataType::BFLOAT16 && a.layout() == Layout::TILE,
+                 "Height-sharded RMSNorm requires tiled BF16 input");
+        TT_FATAL(a.memory_config().buffer_type() == BufferType::L1, "Height-sharded RMSNorm requires L1 input");
+        TT_FATAL(operation_attributes.output_mem_config == a.memory_config(),
+                 "Height-sharded RMSNorm preserves the input memory configuration");
+        TT_FATAL(!b.has_value() && !beta.has_value() && !operation_attributes.fused_activation.has_value(),
+                 "Height-sharded RMSNorm supports only normalization and optional weight");
+        const auto& shard_spec = a.shard_spec().value();
+        TT_FATAL(shard_spec.grid.num_cores() > 0 && shard_spec.shape[0] > 0 &&
+                     shard_spec.shape[0] % tile_height == 0 && shard_spec.shape[1] == a.padded_shape()[-1],
+                 "Height-sharded RMSNorm requires whole-width, tile-aligned row shards");
+        TT_FATAL(a.physical_volume() / a.padded_shape()[-1] ==
+                     shard_spec.shape[0] * shard_spec.grid.num_cores(),
+                 "Height-sharded RMSNorm requires fully populated row shards");
+    } else if (a.is_sharded()) {
         TT_FATAL(
             a.memory_config().memory_layout() != TensorMemoryLayout::HEIGHT_SHARDED,
             "Height sharded inputs are not supported.");

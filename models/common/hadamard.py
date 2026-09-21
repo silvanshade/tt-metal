@@ -111,13 +111,13 @@ def hadamard_rotate(tensor, stage, dtype=None):
     kernel issues only whole-tile reads and the rotation costs one dispatch.
 
     # Specification
-    - requires: nonempty interleaved tiled BF16 device tensor on Blackhole, standard
-      tiles, final width a power of two between 32 and 1024, and a stage pair from
-      `stage_tiles` built for that width.
+    - requires: nonempty tiled BF16 device tensor on Blackhole, standard tiles,
+      interleaved memory at power-of-two widths 32 through 1024 or L1 height-sharded
+      memory with whole 256-wide rows, and a stage pair built for that width.
     - ensures: input is retained; the normalized rotation returns in `dtype` with the
       input's shape and memory configuration.
     - fails: ValueError for non-Blackhole, non-tiled/BF16, nonstandard tile, unsupported
-      width or sharded input.
+      width or shard shape.
     - panics: none.
 
     # Adequacy
@@ -134,7 +134,16 @@ def hadamard_rotate(tensor, stage, dtype=None):
     if tuple(tensor.tile.tile_shape) != (TILE, TILE):
         raise ValueError("Hadamard rotation requires standard 32x32 tiles")
     if tensor.is_sharded():
-        raise ValueError("Hadamard rotation requires interleaved memory")
+        memory = tensor.memory_config()
+        shard = memory.shard_spec
+        if (
+            memory.memory_layout != ttnn.TensorMemoryLayout.HEIGHT_SHARDED
+            or memory.buffer_type != ttnn.BufferType.L1
+            or int(tensor.shape[-1]) != 256
+            or shard.shape[1] != 256
+            or shard.shape[0] % TILE
+        ):
+            raise ValueError("Hadamard sharded input requires L1 height-sharded whole 256-wide rows")
     width = int(tensor.shape[-1])
     _check_width(width)
     tiles = width // TILE
@@ -189,14 +198,22 @@ def hadamard_rotate(tensor, stage, dtype=None):
                 core_ranges=cores,
                 compile_time_args=read_compile,
                 runtime_args=read_args,
-                config=ttnn.ReaderConfigDescriptor(),
+                config=ttnn.DataMovementConfigDescriptor(
+                    processor=ttnn.DataMovementProcessor.RISCV_1,
+                    noc=ttnn.NOC.RISCV_1_default,
+                    noc_mode=ttnn.NOC_MODE.DM_DYNAMIC_NOC,
+                ),
             ),
             ttnn.KernelDescriptor(
                 kernel_source=str(kernels / "writer.cpp"),
                 core_ranges=cores,
                 compile_time_args=write_compile,
                 runtime_args=write_args,
-                config=ttnn.WriterConfigDescriptor(),
+                config=ttnn.DataMovementConfigDescriptor(
+                    processor=ttnn.DataMovementProcessor.RISCV_0,
+                    noc=ttnn.NOC.RISCV_0_default,
+                    noc_mode=ttnn.NOC_MODE.DM_DYNAMIC_NOC,
+                ),
             ),
             ttnn.KernelDescriptor(
                 kernel_source=str(kernels / "compute.cpp"),
@@ -258,7 +275,8 @@ class HadamardRotation:
         """Consume an unrotated tensor; preserve its shape, dtype and memory.
 
         # Specification
-        - requires: nonempty interleaved tiled tensor on Blackhole, with the selected width.
+        - requires: nonempty tiled tensor on Blackhole, with the selected width and
+          an interleaved or H256 L1 height-sharded layout admitted by `hadamard_rotate`.
         - ensures: returns the normalized rotation in the caller's dtype.
         - fails: ValueError for width mismatch or rejected input; runtime allocation and
           dispatch errors propagate.
