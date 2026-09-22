@@ -173,8 +173,14 @@ void kernel_main() {
                  .noc_x_end = in0_mcast_dest_noc_end_x,
                  .noc_y_end = in0_mcast_dest_noc_end_y,
                  .addr = l1_write_addr_in0},
-                true);
+                noc_mode == DM_DEDICATED_NOC);
 #endif
+
+            // Dynamic mode shares this NoC with unicast weight reads. Complete
+            // the unlinked data multicast before publishing its VALID flag.
+            if constexpr (noc_mode == DM_DYNAMIC_NOC) {
+                noc.async_write_barrier();
+            }
 
             receiver_sem.set_multicast(
                 noc,
@@ -250,7 +256,7 @@ void kernel_main() {
                          .noc_x_end = in0_mcast_dest_noc_end_x,
                          .noc_y_end = in0_mcast_dest_noc_end_y,
                          .addr = mcast_l1_write_addr_in0},
-                        true);
+                        noc_mode == DM_DEDICATED_NOC);
                 } else {
                     noc.async_write_multicast<NocOptions::MCAST_INCL_SRC>(
                         CoreLocalMem<uint32_t>(local_read_addr),
@@ -263,9 +269,12 @@ void kernel_main() {
                          .noc_x_end = in0_mcast_dest_noc_end_x,
                          .noc_y_end = in0_mcast_dest_noc_end_y,
                          .addr = mcast_l1_write_addr_in0},
-                        true);
+                        noc_mode == DM_DEDICATED_NOC);
                 }
 #endif
+                if constexpr (noc_mode == DM_DYNAMIC_NOC) {
+                    noc.async_write_barrier();
+                }
                 // Set local semaphore to VALID. For single-core configurations, this is all we need.
                 receiver_sem.set(VALID);
                 if constexpr (in0_mcast_num_cores > 1) {
