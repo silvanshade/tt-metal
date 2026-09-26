@@ -987,10 +987,8 @@ ttnn::device_operation::ProgramArtifacts LayerNormMultiCoreProgramFactory::creat
 
     if (height_sharded && device->arch() != tt::ARCH::QUASAR) {
         reader.compiler_options.defines.emplace("HEIGHT_SHARDED_DUAL_NOC", "1");
-        std::get<m2::DataMovementGen1Config>(std::get<m2::DataMovementHardwareConfig>(reader.hw_config)).noc_mode =
-            NOC_MODE::DM_DYNAMIC_NOC;
-        std::get<m2::DataMovementGen1Config>(std::get<m2::DataMovementHardwareConfig>(writer.hw_config)).noc_mode =
-            NOC_MODE::DM_DYNAMIC_NOC;
+        std::get<m2::DataMovementHardwareConfig>(reader.hw_config).config_1xx->noc_mode = NOC_MODE::DM_DYNAMIC_NOC;
+        std::get<m2::DataMovementHardwareConfig>(writer.hw_config).config_1xx->noc_mode = NOC_MODE::DM_DYNAMIC_NOC;
     }
 
     ////////////////////////////////////////////////////////////////////////////

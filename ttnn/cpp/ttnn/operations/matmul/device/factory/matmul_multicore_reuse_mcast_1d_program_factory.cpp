@@ -639,8 +639,7 @@ MatmulMultiCoreReuseMcast1DProgramFactory::shared_variables_t process_mcast_in0_
 
     // Only the accessor-addressed in1 path reads DRAM one tile at a time; an L1-sharded in1 or the
     // global-CB prefetcher never enters that loop, and there the dynamic mode would be pure cost.
-    const bool in1_both_noc =
-        matmul_in1_both_noc_enabled(device->arch(), !in1_is_locally_sharded && !use_global_cb);
+    const bool in1_both_noc = matmul_in1_both_noc_enabled(device.arch(), !in1_is_locally_sharded && !use_global_cb);
     const tt_metal::NOC_MODE noc_mode =
         in1_both_noc ? tt_metal::NOC_MODE::DM_DYNAMIC_NOC : tt_metal::NOC_MODE::DM_DEDICATED_NOC;
     if (in1_both_noc) {

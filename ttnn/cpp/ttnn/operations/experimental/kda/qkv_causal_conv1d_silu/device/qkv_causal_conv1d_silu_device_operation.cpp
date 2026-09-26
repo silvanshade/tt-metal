@@ -154,6 +154,7 @@ std::vector<Tensor> qkv_causal_conv1d_silu(
     uint32_t k_width,
     uint32_t v_width,
     uint32_t channel_chunk_size,
+    bool use_bf16_addcmul,
     const tt::tt_metal::MemoryConfig& output_mem_config,
     const DeviceComputeKernelConfig& compute_kernel_config,
     const Tensor& actual_start,
