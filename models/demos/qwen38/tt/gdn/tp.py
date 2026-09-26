@@ -25,6 +25,11 @@ from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_seq i
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_gated_deltanet import _causal_conv1d_fir
 from models.tt_transformers.tt.ccl import tt_all_reduce
 
+# Widest per-device conv the native prefill ttnn.conv1d runs at: 2,560 channels (TP=4) is the
+# validated serving width. At 5,120 (TP=2) its static CB region ends at 1,094,720 at both T=128
+# and T=256, above the resident L1 buffers (843,200 and 830,720), so program validation fails.
+_NATIVE_CONV1D_MAX_CHANNELS = 2560
+
 
 def _softplus_add(a, bias):
     """g-gate: softplus(a + bias) fused into one op (softplus as a post-activation on the add)."""
@@ -250,11 +255,16 @@ class TPGatedDeltaNet:
         # In-place state updates for decode/prefill traces (set by model allocate_kv_caches)
         self._stable_state = False
         self.conv_carry = None  # cross-chunk prefill conv carry [1, K-1, qkv_dim_tp]
-        # Split depthwise conv over channel chunks so each native L1_FULL conv fits L1.
-        self._conv_chunks = getattr(args, "gdn_conv_channel_chunks", 1)
-        # Full-width TP=1 prefill exceeds the worker L1 budget, while the fractured TP>=2
-        # activations fit. This also determines projection and norm/relayout placement.
+        # Whether one chunk of this layer's per-device activations fits worker L1: the
+        # [2048 + K-1, qkv_dim_tp] bf16 conv input sharded over the 33-core conv grid, under the
+        # ~830 KB the allocator has free beside the resident projections. True at TP>=2 (509 KB at
+        # TP=4), false at TP=1 (2 MB: the full 16384-wide row set is 43 MB). Decides the L1
+        # placement of the qkvzab projection and the norm/relayout output, which are ~42 MB and
+        # 12 MB at full width.
         self._prefill_fits_l1 = (2048 + self.K - 1) * self.qkv_dim_tp * 2 // 33 <= 800_000
+        # The native ttnn.conv1d only up to _NATIVE_CONV1D_MAX_CHANNELS: wider layers take the
+        # fused FIR (qkv_causal_conv1d_silu), the path TP=1 already serves.
+        self._native_conv1d = self._prefill_fits_l1 and self.qkv_dim_tp <= _NATIVE_CONV1D_MAX_CHANNELS
         # Head concatenation has bounded staging and does not require its tensors to reside in L1.
         self._conv1d_wprep = None  # prepared depthwise weight (populated on first prefill call)
         self._fir_program_config = None
@@ -617,7 +627,7 @@ class TPGatedDeltaNet:
 
         # Keep the resident native conv path; wide and masked FIR uses bounded Q/K/V production.
         _cstate = self.conv_carry if carry else None
-        _native_conv = self._prefill_fits_l1 and valid_len is None
+        _native_conv = self._native_conv1d and valid_len is None
         if not _native_conv and self._fir_program_config is not None and T % 32 == 0:
             q, k, v, conv_new_state = self._conv1d_fir_prefill(qkv, _cstate, valid_len)
         else:
