@@ -155,8 +155,8 @@ pyarrow==23.0.1
 pyworld==0.3.4
 rich==13.7.1
 soundfile==0.12.1
-torch==2.6.0+cpu
+torch==2.12.1+cpu
 torchaudio==2.6.0+cpu
-transformers==5.5.0
+transformers==5.10.1
 wetext==0.0.4
 wget==3.2
