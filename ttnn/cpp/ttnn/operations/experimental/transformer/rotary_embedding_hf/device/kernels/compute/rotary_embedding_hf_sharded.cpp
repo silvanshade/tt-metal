@@ -6,6 +6,7 @@
 
 #include "api/compute/common.h"
 #include "api/compute/eltwise_binary.h"
+#include "api/compute/tile_move_copy.h"
 #include "api/compute/bcast.h"
 #include "api/compute/compute_kernel_hw_startup.h"
 #include "api/dataflow/circular_buffer.h"
@@ -167,7 +168,8 @@ void kernel_main() {
                 ckl::IterationShape::tiles(rotary_Wt).block_size(/*block_size=*/rotary_Wt));
             // Copy the unrotated suffix after the CKL chains while the input is still live.
             if constexpr (rotary_Wt < Wt) {
-                copy_tile_init_with_dt(in_cb_id);
+                reconfig_data_format_srca(cos_interm_cb_id, in_cb_id);
+                copy_init(in_cb_id);
                 for (uint32_t j = rotary_Wt; j < Wt; ++j) {
                     tile_regs_acquire();
                     copy_tile(in_cb_id, j, 0);
