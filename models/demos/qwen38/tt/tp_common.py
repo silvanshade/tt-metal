@@ -27,6 +27,27 @@ COMPUTE_HIFI2 = ttnn.WormholeComputeKernelConfig(
 )
 
 
+# COMPUTE_HIFI2 at LoFi, for bfloat4_b weights. The weight is the matmul's srcA operand, and the LoFi
+# phase already consumes every mantissa bit a bfloat4_b tile holds, so HiFi2's second phase adds
+# nothing: on the TP=2 decode projections (DRAM-sharded, 32 rows, one p150a) the two fidelities give
+# the same error against an fp32 product to every digit, and HiFi2 costs 3-37% more device time
+# (attention qkv 71.3 -> 52.0 us, out-projections 32.8 -> 25.4 us). See `weight_compute_config`.
+COMPUTE_BFP4_LOFI = ttnn.WormholeComputeKernelConfig(
+    math_fidelity=ttnn.MathFidelity.LoFi,
+    math_approx_mode=True,
+    fp32_dest_acc_en=True,
+    packer_l1_acc=True,
+)
+
+
+def weight_compute_config(compute_cfg, weight):
+    """`compute_cfg`, or COMPUTE_BFP4_LOFI where it is COMPUTE_HIFI2 on a bfloat4_b weight."""
+    if compute_cfg is COMPUTE_HIFI2 and weight.dtype == ttnn.bfloat4_b:
+        return COMPUTE_BFP4_LOFI
+    return compute_cfg
+
+
+
 # Grid helpers
 def prefill_grid_default():
     """BH P150: (8,10); WH: (8,8). y capped at 10 on BH (grid_x=10 breaks matmul)."""
@@ -743,7 +764,7 @@ def sharded_decode_matmul(
 ):
     """DRAM-WIDTH_SHARDED weight matmul; branches on M (decode vs prefill).
 
-    Decode (M<=32): L1-sharded act + DRAM-sharded kernel. Prefill: 2D matmul.
+    Decode (M<=32): L1-sharded act + DRAM-sharded kernel, at `weight_compute_config`. Prefill: 2D matmul.
     Gate on x.shape[-2] (seq/M), not x.shape[1] (Z=1 in both modes). Decode result placement is
     `decode_out_memory_config` (default DRAM-interleaved; pass L1 to keep the small decode
     activation resident). Prefill result is always DRAM-interleaved."""
@@ -755,7 +776,7 @@ def sharded_decode_matmul(
         out = ttnn.linear(
             x_sh,
             weight,
-            compute_kernel_config=compute_cfg,
+            compute_kernel_config=weight_compute_config(compute_cfg, weight),
             program_config=decode_progcfg,
             memory_config=ttnn.L1_WIDTH_SHARDED_MEMORY_CONFIG,
         )
