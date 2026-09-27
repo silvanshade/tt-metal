@@ -1014,8 +1014,7 @@ bool MeshDeviceImpl::close_impl(MeshDevice* pimpl_wrapper) {
 
     log_trace(tt::LogMetal, "Closing mesh device {}", this->id());
 
-    // Shut down the CQ first so dispatch_s sends TERMINATE to the profiler core with the
-    // final buffer; the push kernel, receiver thread, and callbacks must still be alive.
+    // Drain logical CQs before the profiler terminal flush; physical dispatch stays live.
     if (is_initialized()) {
         if (metal_env().get_cluster().get_target_device_type() != tt::TargetDevice::Mock) {
             ReadMeshDeviceProfilerResults(*pimpl_wrapper, ProfilerReadState::LAST_FD_READ);
@@ -1072,10 +1071,11 @@ bool MeshDeviceImpl::close_impl(MeshDevice* pimpl_wrapper) {
         mesh_command_queues_.clear();
     }
 
-    // Tear down RT profiler after the CQ has shut down (so dispatch_s has already issued
-    // the final TERMINATE) but before the rest of the device teardown.
+    // Mesh CQs are drained; physical dispatch remains live until ScopedDevices closes.
+    // The profiler sends its own ordered terminal flush and waits for both RISCs before unpinning.
+    bool profiler_shutdown_ok = true;
     if (realtime_profiler_) {
-        realtime_profiler_->shutdown();
+        profiler_shutdown_ok = realtime_profiler_->shutdown();
         realtime_profiler_.reset();
     }
     streaming_profiler_.reset();
@@ -1131,7 +1131,7 @@ bool MeshDeviceImpl::close_impl(MeshDevice* pimpl_wrapper) {
         destroy_metal_context_instance_on_close_ = false;
     }
 
-    return true;
+    return profiler_shutdown_ok;
 }
 
 std::optional<int> MeshDeviceImpl::get_parent_mesh_id_with_in_use_cq(uint32_t cq_id) const {

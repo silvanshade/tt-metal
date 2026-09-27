@@ -257,6 +257,28 @@ void signal_realtime_profiler_and_switch(volatile tt_l1_ptr realtime_profiler_ms
     }
 }
 
+/// Publish the final profiler buffer and disable further profiler writes from this dispatcher.
+/// # Specification
+/// - requires: earlier commands on this dispatch_s stream have completed.
+/// - ensures: an enabled profiler receives a terminal buffer selection; subsequent dispatch continues unprofiled.
+/// - fails: a stalled NoC prevents completion; host shutdown must retain DMA ownership without an acknowledgment.
+/// - panics: none.
+FORCE_INLINE
+void terminate_realtime_profiler() {
+    if (rt_profiler_enabled) {
+        const bool buffer_a = rt_profiler_msg->realtime_profiler_state == REALTIME_PROFILER_STATE_PUSH_B;
+        const auto state = buffer_a ? REALTIME_PROFILER_STATE_TERMINATE_A : REALTIME_PROFILER_STATE_TERMINATE_B;
+        const uint64_t addr = get_noc_addr_helper(
+            rt_profiler_msg->realtime_profiler_core_noc_xy, rt_profiler_msg->realtime_profiler_remote_state_addr);
+        // One terminal message carries the final buffer; a separate PUSH can be overwritten.
+        dispatch_s_noc_inline_dw_write(addr, state, my_noc_index);
+    }
+    // The dispatch TRISC must leave its enable-wait loop even when RT profiling was never enabled.
+    rt_profiler_msg->realtime_profiler_state = REALTIME_PROFILER_STATE_TERMINATE;
+    rt_profiler_msg->realtime_profiler_core_noc_xy = 0;
+    rt_profiler_enabled = false;
+}
+
 FORCE_INLINE
 uint32_t stream_wrap_gt(uint32_t a, uint32_t b) {
     constexpr uint32_t shift = 32 - MEM_WORD_ADDR_WIDTH;
@@ -686,25 +708,14 @@ void kernel_main() {
                 wait_for_workers(
                     load_aligned<uint32_t>(&cmd->rt_profiler_flush.wait_count),
                     load_aligned<uint32_t>(&cmd->rt_profiler_flush.wait_stream));
+                if (cmd->rt_profiler_flush.terminate) {
+                    terminate_realtime_profiler();
+                }
                 cmd_ptr += sizeof(CQDispatchCmd);
                 break;
             case CQ_DISPATCH_CMD_TERMINATE:
                 DPRINT("CQ_DISPATCH_CMD_TERMINATE\n");
-                if (rt_profiler_enabled) {
-                    signal_realtime_profiler_and_switch(rt_profiler_msg);
-                    noc_async_writes_flushed();
-                    for (volatile uint32_t delay = 0; delay < 5000; delay++) {
-                    }
-                }
-
-                rt_profiler_msg->realtime_profiler_state = REALTIME_PROFILER_STATE_TERMINATE;
-                if (rt_profiler_enabled) {
-                    uint64_t realtime_profiler_terminate_addr = get_noc_addr_helper(
-                        rt_profiler_msg->realtime_profiler_core_noc_xy,
-                        rt_profiler_msg->realtime_profiler_remote_state_addr);
-                    dispatch_s_noc_inline_dw_write(
-                        realtime_profiler_terminate_addr, REALTIME_PROFILER_STATE_TERMINATE, my_noc_index);
-                }
+                terminate_realtime_profiler();
                 if constexpr (telemetry_enabled) {
                     dispatch_telemetry_control->compute_terminate = 1;
                 }

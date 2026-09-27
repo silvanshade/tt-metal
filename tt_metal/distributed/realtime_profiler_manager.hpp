@@ -56,9 +56,18 @@ public:
     RealtimeProfilerManager(RealtimeProfilerManager&&) = delete;
     RealtimeProfilerManager& operator=(RealtimeProfilerManager&&) = delete;
 
-    // Idempotent: writes terminate flag, joins receiver thread, releases Tracy handler,
-    // and notifies deactivation. Safe to call multiple times.
-    void shutdown();
+    /// Stop producers and drain registered consumers without stopping shared physical dispatch.
+    /// # Specification
+    /// - requires: owning mesh command queues have drained; no new profiler programs are enqueued.
+    /// - ensures: on success both profiler RISCs have completed before their DMA socket is released.
+    /// - provides: true after acknowledged shutdown, including a repeated call after cleanup.
+    /// - fails: a device stop failure returns false, logs the error, and retains its socket rather than unpin live DMA.
+    /// - panics: none.
+    /// # Adequacy
+    /// - hypothesis: close delivers pending final records without terminating sibling dispatch.
+    /// - witness: RealtimeProfilerSanity.CloseDrainsRegisteredCallback.
+    /// - witness: RealtimeProfilerSanity.ClosingUnitMeshPreservesSiblingProfiler.
+    bool shutdown();
 
     // Requests the receiver to run a finish-path sync and blocks until it completes or times out; throttled to one
     // request per 60s and a no-op when no devices are active.
@@ -84,6 +93,7 @@ private:
         std::unique_ptr<Program> realtime_profiler_program;
         RealtimeProfilerCoreL1Addrs core_l1;
         bool fifo_reached_capacity = false;
+        bool shutdown_acknowledged = false;
         uint64_t first_timestamp = 0;
         int64_t sync_host_start = 0;
         double sync_frequency = 0.0;

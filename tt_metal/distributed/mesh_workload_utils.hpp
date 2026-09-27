@@ -35,6 +35,6 @@ void write_go_signal_sequence(
     std::optional<uint32_t> config_ring_sync_count);
 
 void write_rt_profiler_flush(
-    uint8_t cq_id, SubDeviceId sub_device_id, SystemMemoryManager& sysmem_manager, uint32_t wait_count);
+    uint8_t cq_id, SubDeviceId sub_device_id, SystemMemoryManager& sysmem_manager, uint32_t wait_count, bool terminate);
 
 }  // namespace tt::tt_metal::distributed

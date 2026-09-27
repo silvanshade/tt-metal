@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -231,7 +232,7 @@ TEST(RealtimeProfilerSanity, CloseDrainsRegisteredCallback) {
         enqueue_sanity_program(mesh_device, i + 1, all_cores);
     }
 
-    mesh_device->quiesce_devices();
+    // No explicit quiesce or grace sleep: close must finish production before releasing the socket.
     EXPECT_TRUE(mesh_device->close());
 
     UnregisterProgramRealtimeProfilerCallback(handle);
@@ -244,6 +245,53 @@ TEST(RealtimeProfilerSanity, CloseDrainsRegisteredCallback) {
     }
     EXPECT_EQ(observed_runtime_ids.size(), kNumPrograms)
         << "Mesh close should drain records for callbacks still registered at shutdown";
+}
+
+TEST(RealtimeProfilerSanity, ClosingUnitMeshPreservesSiblingProfiler) {
+    std::vector<int> device_ids;
+    for (size_t id = 0; id < GetNumAvailableDevices() && device_ids.size() < 2; ++id) {
+        if (GetPCIeDeviceID(id) == id) {
+            device_ids.push_back(id);
+        }
+    }
+    if (device_ids.size() < 2) {
+        GTEST_SKIP() << "Requires two local PCIe devices";
+    }
+
+    auto meshes = distributed::MeshDevice::create_unit_meshes(
+        device_ids, DEFAULT_L1_SMALL_SIZE, DEFAULT_TRACE_REGION_SIZE, 1, DispatchCoreConfig{DispatchCoreType::WORKER});
+    if (!IsProgramRealtimeProfilerActive()) {
+        for (auto& [id, mesh] : meshes) {
+            mesh->close();
+        }
+        GTEST_SKIP() << "Real-time profiler is not active on this dispatch config";
+    }
+
+    std::mutex records_mutex;
+    std::set<std::pair<int, uint32_t>> observed;
+    auto handle = RegisterProgramRealtimeProfilerCallback([&](const ProgramRealtimeRecordBatch& batch) {
+        std::lock_guard lock(records_mutex);
+        for (const auto& record : batch.records) {
+            observed.emplace(record.chip_id, record.runtime_id);
+        }
+    });
+    auto& first = meshes.at(device_ids[0]);
+    auto& sibling = meshes.at(device_ids[1]);
+    const auto first_grid = first->compute_with_storage_grid_size();
+    const auto sibling_grid = sibling->compute_with_storage_grid_size();
+    const CoreRange first_cores(CoreCoord{0, 0}, CoreCoord{first_grid.x - 1, first_grid.y - 1});
+    const CoreRange sibling_cores(CoreCoord{0, 0}, CoreCoord{sibling_grid.x - 1, sibling_grid.y - 1});
+    enqueue_sanity_program(first, 1, first_cores);
+    enqueue_sanity_program(sibling, 2, sibling_cores);
+    EXPECT_TRUE(first->close());
+
+    // Both meshes share physical-device ownership; closing one must leave the other usable.
+    enqueue_sanity_program(sibling, 3, sibling_cores);
+    EXPECT_TRUE(sibling->close());
+    UnregisterProgramRealtimeProfilerCallback(handle);
+
+    const std::set<std::pair<int, uint32_t>> expected{{device_ids[0], 1}, {device_ids[1], 2}, {device_ids[1], 3}};
+    EXPECT_EQ(observed, expected);
 }
 
 TEST(RealtimeProfilerSanity, ThrowingCallbackIsIsolated) {

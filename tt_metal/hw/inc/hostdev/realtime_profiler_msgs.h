@@ -13,10 +13,12 @@
 #include <cstdint>
 
 enum RealtimeProfilerState : uint32_t {
-    REALTIME_PROFILER_STATE_IDLE = 0,       // Waiting for initialization, skip iteration
-    REALTIME_PROFILER_STATE_PUSH_A = 1,     // Push real-time profiler data from buffer A
-    REALTIME_PROFILER_STATE_PUSH_B = 2,     // Push real-time profiler data from buffer B
-    REALTIME_PROFILER_STATE_TERMINATE = 3,  // Signal to terminate the kernel
+    REALTIME_PROFILER_STATE_IDLE = 0,         // Waiting for initialization, skip iteration
+    REALTIME_PROFILER_STATE_PUSH_A = 1,       // Push real-time profiler data from buffer A
+    REALTIME_PROFILER_STATE_PUSH_B = 2,       // Push real-time profiler data from buffer B
+    REALTIME_PROFILER_STATE_TERMINATE = 3,    // Signal to terminate the kernel
+    REALTIME_PROFILER_STATE_TERMINATE_A = 4,  // Enqueue buffer A, then terminate
+    REALTIME_PROFILER_STATE_TERMINATE_B = 5,  // Enqueue buffer B, then terminate
 };
 
 struct realtime_profiler_timestamp_t {

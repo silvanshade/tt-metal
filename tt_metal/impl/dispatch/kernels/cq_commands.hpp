@@ -412,7 +412,7 @@ struct CQDispatchNotifySubordinateGoSignalCmd {
 } __attribute__((packed));
 
 struct CQDispatchRtProfilerFlushCmd {
-    uint8_t pad1;
+    uint8_t terminate;  // stop profiling after this final flush, without stopping dispatch
     uint16_t pad2;
     uint32_t wait_count;   // worker completion count to wait on
     uint32_t wait_stream;  // stream index to wait on
