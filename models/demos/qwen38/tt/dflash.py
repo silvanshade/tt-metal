@@ -9,6 +9,7 @@ on hidden, norms gather it. Context keys and values live in a per-layer ring of 
 """
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,11 +19,22 @@ from safetensors import safe_open
 import ttnn
 from models.demos.qwen38.tt import tp_common as tpc
 from models.tt_transformers.tt.ccl import tt_all_reduce
+from models.tt_transformers.tt.common import Mode
 
 if TYPE_CHECKING:
     from models.demos.qwen38.tt.model import Qwen38Model
 
 _TILE = ttnn.Tile([32, 32])
+
+
+@dataclass(frozen=True)
+class _Projection:
+    """Matmul for at most 32 rows: per-device weight [K, N] width-sharded across DRAM banks,
+    activation width-sharded in L1, DRAM-sharded program (the target's decode matmul path)."""
+
+    weight: ttnn.Tensor
+    program: ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig
+    activation: ttnn.MemoryConfig
 
 
 def _ring_write(source: ttnn.Tensor, ring: ttnn.Tensor, base: ttnn.Tensor) -> None:
@@ -142,14 +154,42 @@ class Qwen38DFlash:
                 tensor, dtype=dtype, layout=layout, device=mesh, mesh_mapper=mapper, memory_config=ttnn.DRAM_MEMORY_CONFIG
             )
 
-        def column(name):
-            return tpc.shard_w(weights[name], mesh, -1, ttnn.DRAM_MEMORY_CONFIG, None, dtype=weight_dtype)
+        workers = target.args.dram_sharded_workers
 
-        def row(name):
-            return tpc.shard_w(weights[name], mesh, 0, ttnn.DRAM_MEMORY_CONFIG, None, dtype=weight_dtype)
+        def projection(tensor: torch.Tensor, dim: int | None, dtype: ttnn.DataType = weight_dtype) -> _Projection:
+            """Checkpoint weight [out, in]: dim -1 column-parallel, 0 row-parallel, None replicated."""
+            n, k = tensor.shape
+            k = k // self.tp if dim == 0 else k
+            n = n // self.tp if dim == -1 else n
+            weight = ttnn.as_tensor(
+                tensor.to(torch.bfloat16).T.contiguous(),
+                dtype=dtype,
+                device=mesh,
+                mesh_mapper=rep if dim is None else ttnn.ShardTensorToMesh(mesh, dim=dim),
+                layout=ttnn.TILE_LAYOUT,
+                memory_config=tpc.create_dram_sharded_mem_config(k, n),
+            )
+            program = tpc.create_dram_sharded_matmul_program_config(32, k, n, num_workers_per_dram_bank=workers)
+            return _Projection(weight, program, tpc.create_activation_shard_config(k))
+
+        def column(name: str) -> _Projection:
+            return projection(weights[name], -1)
+
+        def row(name: str) -> _Projection:
+            return projection(weights[name], 0)
 
         def vector(tensor: torch.Tensor) -> ttnn.Tensor:
             return dram(tensor.float().reshape(1, 1, 1, -1), ttnn.bfloat16)
+
+        def gamma(tensor: torch.Tensor) -> ttnn.Tensor:
+            """Hidden-width norm weight in the row-major [1, 1, hidden/32, 32] sharded-norm layout."""
+            return dram(tensor.float().reshape(1, 1, -1, 32), ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT)
+
+        # Residual norms use the target's decode layout: gather straight into a width-sharded L1
+        # activation, one sharded norm program across its cores.
+        norm_config = target.args.get_norm_config("attn", Mode.DECODE)
+        self.norm_program = norm_config["sharded_program_config"]
+        self.norm_memory = norm_config["sharded_output_config"]
 
         # Target taps stay fractured: each device holds its local hidden slice of every tap, in tap
         # order. Row-parallel fc input rows follow [device][tap][local hidden].
@@ -160,10 +200,23 @@ class Qwen38DFlash:
             for tap in range(len(self.taps))
             for k in range(local)
         ]
-        self.fc = tpc.shard_w(weights["fc.weight"][:, order], mesh, 0, ttnn.DRAM_MEMORY_CONFIG, None, dtype=weight_dtype)
-        self.hidden_norm = vector(weights["hidden_norm.weight"])
-        self.norm = vector(weights["norm.weight"])
-        self.hidden_projection = weights["candidate_selector.hidden_projection.weight"].float()
+        self.fc = projection(weights["fc.weight"][:, order], 0)
+        self.hidden_norm = gamma(weights["hidden_norm.weight"])
+        self.norm = gamma(weights["norm.weight"])
+        # Selector scores compare near-tied candidates: BF16 weight, HiFi4, FP32 output.
+        self.selector_projection = projection(
+            weights["candidate_selector.hidden_projection.weight"], None, ttnn.bfloat16
+        )
+        self.selector_width = self.selector_projection.weight.shape[-1]
+        # Candidates come from the target's vocab-sharded LM head without gathering logits: each
+        # device takes the top local_candidates of its shard in one topk (Blackhole routes this
+        # width to its multi-core large-index top-k; slicing into topk-friendly parts measured
+        # slower) and the host merges devices. The global top-k lies within the per-device top-k,
+        # so a tile-wide local_candidates >= top_k keeps the merge exact.
+        if self.tp > 1 and not target._lmhead_vocab_sharded:
+            raise ValueError("DFlash2 candidates need a vocab-sharded target LM head")
+        self.local_vocab = target.lm_head_weight.shape[-1]
+        self.local_candidates = 32 * -(-self.top_k // 32)
         self.predecessor = weights["candidate_selector.predecessor_codebook"]
         self.successor = weights["candidate_selector.successor_codebook"]
         expand = torch.zeros(self.groups, self.hidden)
@@ -198,8 +251,8 @@ class Qwen38DFlash:
         for i in range(self.layer_count):
             p = f"layers.{i}"
             layer = {
-                "input_norm": vector(weights[f"{p}.input_layernorm.weight"]),
-                "post_norm": vector(weights[f"{p}.post_attention_layernorm.weight"]),
+                "input_norm": gamma(weights[f"{p}.input_layernorm.weight"]),
+                "post_norm": gamma(weights[f"{p}.post_attention_layernorm.weight"]),
                 "q": column(f"{p}.self_attn.q_proj.weight"),
                 "k": column(f"{p}.self_attn.k_proj.weight"),
                 "v": column(f"{p}.self_attn.v_proj.weight"),
@@ -212,10 +265,8 @@ class Qwen38DFlash:
             }
             for conv in ("attention_conv", "mlp_conv"):
                 layer[conv] = {
-                    "projection": dram(
-                        weights[f"{p}.{conv}.kernel_projection.weight"].T.contiguous().reshape(1, 1, self.hidden, -1),
-                        ttnn.bfloat16,
-                    ),
+                    # Dynamic conv coefficients: kept BF16 like the reference (replicated, 13 MB).
+                    "projection": projection(weights[f"{p}.{conv}.kernel_projection.weight"], None, ttnn.bfloat16),
                     "base": [[vector(weights[f"{p}.{conv}.base_kernel"][h, t]) for t in range(kernel)] for h in range(2)],
                 }
             zeros = torch.zeros(1, self.kv_heads, self.ring_rows, self.head_dim)
@@ -227,8 +278,24 @@ class Qwen38DFlash:
 
     # ---------------------------------------------------------------- helpers
 
-    def _linear(self, x: ttnn.Tensor, weight: ttnn.Tensor, **kwargs) -> ttnn.Tensor:
-        return ttnn.linear(x, weight, compute_kernel_config=self.compute, **kwargs)
+    def _project(
+        self, x: ttnn.Tensor, projection: _Projection, *, precise: bool = False, dtype: ttnn.DataType | None = None
+    ) -> ttnn.Tensor:
+        """At most 32 rows [1,1,rows,K] -> DRAM-interleaved [1,1,rows,N]."""
+        assert x.shape[-2] <= 32
+        sharded = ttnn.to_memory_config(x, projection.activation)
+        out = ttnn.linear(
+            sharded,
+            projection.weight,
+            program_config=projection.program,
+            memory_config=ttnn.L1_WIDTH_SHARDED_MEMORY_CONFIG,
+            compute_kernel_config=self.precise if precise else self.compute,
+            **({} if dtype is None else {"dtype": dtype}),
+        )
+        ttnn.deallocate(sharded)
+        result = ttnn.to_memory_config(out, ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(out)
+        return result
 
     def _matmul(self, a: ttnn.Tensor, b: ttnn.Tensor, **kwargs) -> ttnn.Tensor:
         return ttnn.matmul(a, b, compute_kernel_config=self.compute, **kwargs)
@@ -243,15 +310,24 @@ class Qwen38DFlash:
             multi_device_global_semaphore=self.target.tt_ccl.get_and_cycle_ag_semaphore_handles(),
             num_links=self.target.tt_ccl.get_num_links(1),
             topology=self.target.args.ccl_topology(),
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            memory_config=self.norm_memory,
             barrier_semaphore=self.target.tt_ccl.get_and_cycle_barrier_semaphore_handle(),
             chunks_per_sync=10,
             num_workers_per_link=2,
             num_buffers_per_channel=2,
         )
-        out = ttnn.rms_norm(full, weight=weight, epsilon=self.eps, compute_kernel_config=self.precise)
+        out = ttnn.rms_norm(
+            full,
+            weight=weight,
+            epsilon=self.eps,
+            program_config=self.norm_program,
+            memory_config=self.norm_memory,
+            compute_kernel_config=self.precise,
+        )
         ttnn.deallocate(full)
-        return out
+        interleaved = ttnn.sharded_to_interleaved(out, ttnn.DRAM_MEMORY_CONFIG)
+        ttnn.deallocate(out)
+        return interleaved
 
     def _reduce(self, partial: ttnn.Tensor) -> ttnn.Tensor:
         """Row-parallel partial sums -> residual fractured on hidden."""
@@ -310,14 +386,14 @@ class Qwen38DFlash:
         """Append context rows: fractured taps [1,1,rows<=32,taps*hidden/tp] (per device, its local
         slice of each tap in tap order) at `positions`, written to ring rows base, base+1, ...
         (base = first position minus origin, mod ring)."""
-        context = self._reduce(self._linear(taps, self.fc))
+        context = self._reduce(self._project(taps, self.fc))
         full = self._norm(context, self.hidden_norm)
         ttnn.deallocate(context)
         cos, sin = self._rotations(positions)
         for layer in self.layers:
-            keys = self._heads(self._linear(full, layer["k"]), self.local_kv, layer["k_norm"], cos, sin)
+            keys = self._heads(self._project(full, layer["k"]), self.local_kv, layer["k_norm"], cos, sin)
             values = ttnn.permute(
-                ttnn.reshape(self._linear(full, layer["v"]), (1, taps.shape[2], self.local_kv, self.head_dim)),
+                ttnn.reshape(self._project(full, layer["v"]), (1, taps.shape[2], self.local_kv, self.head_dim)),
                 (0, 2, 1, 3),
             )
             for source, ring in zip((keys, values), layer["ring"], strict=True):
@@ -445,13 +521,13 @@ class Qwen38DFlash:
         for layer in self.layers:
             x = self._norm(h, layer["input_norm"])
             conv = layer["attention_conv"]
-            dynamic = self._linear(x, conv["projection"])
+            dynamic = self._project(x, conv["projection"])
             x_conv = self._conv(x, dynamic, conv, 0)
             ttnn.deallocate(x)
-            q = self._heads(self._linear(x_conv, layer["q"]), self.local_heads, layer["q_norm"], cos, sin)
-            k = self._heads(self._linear(x_conv, layer["k"]), self.local_kv, layer["k_norm"], cos, sin)
+            q = self._heads(self._project(x_conv, layer["q"]), self.local_heads, layer["q_norm"], cos, sin)
+            k = self._heads(self._project(x_conv, layer["k"]), self.local_kv, layer["k_norm"], cos, sin)
             v = ttnn.permute(
-                ttnn.reshape(self._linear(x_conv, layer["v"]), (1, rows, self.local_kv, self.head_dim)), (0, 2, 1, 3)
+                ttnn.reshape(self._project(x_conv, layer["v"]), (1, rows, self.local_kv, self.head_dim)), (0, 2, 1, 3)
             )
             ttnn.deallocate(x_conv)
             per_group = self.local_heads // self.local_kv
@@ -480,7 +556,7 @@ class Qwen38DFlash:
             attended = ttnn.reshape(
                 ttnn.permute(attended, (0, 2, 1, 3)), (1, 1, rows, self.local_heads * self.head_dim)
             )
-            partial = self._linear(attended, layer["o"])
+            partial = self._project(attended, layer["o"])
             ttnn.deallocate(attended)
             finished = self._conv(partial, dynamic, conv, 1)
             ttnn.deallocate(partial)
@@ -491,12 +567,12 @@ class Qwen38DFlash:
 
             x = self._norm(h, layer["post_norm"])
             conv = layer["mlp_conv"]
-            dynamic = self._linear(x, conv["projection"])
+            dynamic = self._project(x, conv["projection"])
             x_conv = self._conv(x, dynamic, conv, 0)
             ttnn.deallocate(x)
-            gated = ttnn.multiply(ttnn.silu(self._linear(x_conv, layer["gate"])), self._linear(x_conv, layer["up"]))
+            gated = ttnn.multiply(ttnn.silu(self._project(x_conv, layer["gate"])), self._project(x_conv, layer["up"]))
             ttnn.deallocate(x_conv)
-            partial = self._linear(gated, layer["down"])
+            partial = self._project(gated, layer["down"])
             ttnn.deallocate(gated)
             finished = self._conv(partial, dynamic, conv, 1)
             ttnn.deallocate(partial)
@@ -510,19 +586,28 @@ class Qwen38DFlash:
         ttnn.deallocate(h)
         return out
 
-    def candidates(self, hidden: ttnn.Tensor) -> tuple[ttnn.Tensor, ttnn.Tensor]:
-        """Top-k logits and token ids per block row from the target LM head: [1,1,8,k] each."""
-        logits = self.target._lm_head(hidden)
-        valid = logits[..., : self.target.vocab_size]
-        values, indices = ttnn.topk(valid, k=self.top_k, dim=-1)
+    def candidates(self, hidden: ttnn.Tensor) -> tuple[ttnn.Tensor, ttnn.Tensor, ttnn.Tensor]:
+        """Per block row: per device, the top local_candidates logits and shard-local ids of its
+        vocabulary shard ([1,1,8,C] each; merge() maps them to tokens), and the selector's FP32
+        hidden projection [1,1,8,P] (replicated)."""
+        logits = ttnn.linear(hidden, self.target.lm_head_weight)
+        values, indices = ttnn.topk(logits, k=self.local_candidates, dim=-1)
         ttnn.deallocate(logits)
-        return values, indices
+        projected = self._project(hidden, self.selector_projection, precise=True, dtype=ttnn.float32)
+        return values, indices, projected
 
-    def select(self, hidden: torch.Tensor, values: torch.Tensor, indices: torch.Tensor, anchor: int) -> list[int]:
-        """Greedy candidate-selector walk on host: hidden [7,hidden], values/indices [7,k]."""
-        projected = hidden.float() @ self.hidden_projection.T
+    def merge(self, values: torch.Tensor, indices: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-device shard candidates [devices, rows, C] -> global top-k values and token ids [rows, k]."""
+        devices, rows, _ = values.shape
+        device = torch.arange(devices).reshape(-1, 1, 1) * self.local_vocab
+        ids = (indices.long() + device).permute(1, 0, 2).reshape(rows, -1)
+        top = torch.topk(values.float().permute(1, 0, 2).reshape(rows, -1), self.top_k, dim=-1)
+        return top.values, torch.gather(ids, 1, top.indices)
+
+    def select(self, projected: torch.Tensor, values: torch.Tensor, indices: torch.Tensor, anchor: int) -> list[int]:
+        """Greedy candidate-selector walk on host: projected [7,P], values/indices [7,k]."""
         predecessor, path = anchor, []
-        for p in range(hidden.shape[0]):
+        for p in range(projected.shape[0]):
             candidates = indices[p].long()
             scores = values[p].float() + self.successor[candidates].float() @ (
                 self.predecessor[predecessor].float() * projected[p]
@@ -549,14 +634,20 @@ class Qwen38DFlash:
             self.ring_mask(start), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, mesh_mapper=rep
         )
         hidden = self.draft(token_ids, positions, mask)
-        values, indices = self.candidates(hidden)
+        values, indices, projected = self.candidates(hidden)
 
         def rows(tensor: ttnn.Tensor) -> torch.Tensor:
-            host = ttnn.to_torch(ttnn.get_device_tensors(tensor)[0])
-            return host.reshape(-1, tensor.shape[-1])[1 : self.block]
+            """[devices, block rows 1.., width] from every device."""
+            return torch.stack(
+                [
+                    ttnn.to_torch(part).reshape(-1, tensor.shape[-1])[1 : self.block]
+                    for part in ttnn.get_device_tensors(tensor)
+                ]
+            )
 
-        proposal = self.select(rows(hidden).float(), rows(values).float(), rows(indices).long(), anchor)
-        for tensor in (token_ids, positions, mask, hidden, values, indices):
+        top_values, top_ids = self.merge(rows(values), rows(indices))
+        proposal = self.select(rows(projected)[0].float(), top_values, top_ids, anchor)
+        for tensor in (token_ids, positions, mask, hidden, values, indices, projected):
             ttnn.deallocate(tensor)
         return proposal
 
