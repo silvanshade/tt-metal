@@ -267,7 +267,9 @@ class Qwen38DFlash:
             compute_with_storage_grid_size=(min(8, attention_grid.x), min(8, attention_grid.y)),
             exp_approx_mode=False,
             q_chunk_size=0,
-            k_chunk_size=self.attention_chunk,
+            # One card holds every query head, so its circular buffers need 32-row K chunks
+            # to fit L1; the ring stays padded to whole 128-row chunks either way.
+            k_chunk_size=self.attention_chunk if self.tp > 1 else 32,
         )
         # Device-resident round inputs derive from one FP32 start scalar and the origin scalar.
         self.slot_index = dram(torch.arange(self.ring_rows, dtype=torch.float32).reshape(1, 1, 1, -1), ttnn.float32)
@@ -354,20 +356,24 @@ class Qwen38DFlash:
 
     def _norm(self, fractured: ttnn.Tensor, weight: ttnn.Tensor) -> ttnn.Tensor:
         """Gather the fractured residual and apply checkpoint RMSNorm (gamma = weight)."""
-        # The residual outlives the norm, so gather directly (tt_all_gather frees its input).
-        full = ttnn.experimental.all_gather_async(
-            fractured,
-            persistent_output_buffer=None,
-            dim=3,
-            multi_device_global_semaphore=self.target.tt_ccl.get_and_cycle_ag_semaphore_handles(),
-            num_links=self.target.tt_ccl.get_num_links(1),
-            topology=self.target.args.ccl_topology(),
-            memory_config=self.norm_memory,
-            barrier_semaphore=self.target.tt_ccl.get_and_cycle_barrier_semaphore_handle(),
-            chunks_per_sync=10,
-            num_workers_per_link=2,
-            num_buffers_per_channel=2,
-        )
+        if self.tp == 1:
+            # One card holds the whole residual; only the norm's sharded layout is needed.
+            full = ttnn.to_memory_config(fractured, self.norm_memory)
+        else:
+            # The residual outlives the norm, so gather directly (tt_all_gather frees its input).
+            full = ttnn.experimental.all_gather_async(
+                fractured,
+                persistent_output_buffer=None,
+                dim=3,
+                multi_device_global_semaphore=self.target.tt_ccl.get_and_cycle_ag_semaphore_handles(),
+                num_links=self.target.tt_ccl.get_num_links(1),
+                topology=self.target.args.ccl_topology(),
+                memory_config=self.norm_memory,
+                barrier_semaphore=self.target.tt_ccl.get_and_cycle_barrier_semaphore_handle(),
+                chunks_per_sync=10,
+                num_workers_per_link=2,
+                num_buffers_per_channel=2,
+            )
         out = ttnn.rms_norm(
             full,
             weight=weight,
