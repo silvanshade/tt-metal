@@ -147,8 +147,10 @@ def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scal
     """Return every row's output; write the state after each row into `snapshots`.
 
     requires: FP32 activated [1, T, W] from `verify_conv`, W = (2 * key_heads + H) * 128 holding
-        q, k (key heads) then v (value heads); FP32 g/beta [T,1,H]; FP32 state [1,H,128,128]; FP32
-        snapshots [>=T,H,128,128]; value head h reads key head h // (H / key_heads); interleaved tiles.
+        q, k (key heads) then v (value heads); BF16 g and beta blocks [1, T, G], G >= 2H, holding
+        head h's decay argument at column h of g and its beta at column H + h
+        of beta; FP32 state [1,H,128,128]; FP32 snapshots [>=T,H,128,128]; value head h reads key
+        head h // (H / key_heads); interleaved tiles.
     ensures: q and k are L2-normalized (q times `scale`) per row; each head advances rows in order;
         `state` is not written; snapshot r holds the state after rows 0..r. No state or token crosses
         the host boundary. Padding is not part of the result.
@@ -157,10 +159,14 @@ def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scal
     heads = state.shape[1]
     assert width == (2 * key_heads + heads) * 128 and heads % key_heads == 0
     assert 1 <= rows <= 32 and snapshots.shape[0] >= rows and snapshots.shape[1] == heads
+    gate_width = g.shape[-1]
+    assert tuple(g.shape) == tuple(beta.shape) == (1, rows, gate_width) and 2 * heads <= gate_width
+    assert all(t.dtype == ttnn.bfloat16 and t.layout == ttnn.TILE_LAYOUT and not t.is_sharded() for t in (g, beta))
     device = activated.device()
     tensors = (activated, g, beta, state)
     assert all(
-        t.dtype == ttnn.float32 and t.layout == ttnn.TILE_LAYOUT and not t.is_sharded() for t in (*tensors, snapshots)
+        t.dtype == ttnn.float32 and t.layout == ttnn.TILE_LAYOUT and not t.is_sharded()
+        for t in (activated, state, snapshots)
     )
     output = ttnn.empty(
         [rows, 1, heads, 128],
@@ -176,10 +182,12 @@ def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scal
     # coordinates, so every argument is common and dispatch writes it once per kernel.
     grid_x = device.compute_with_storage_grid_size().x
     n = columns
+    gate_tiles = -(-gate_width // 32)
     pages = {0: 4, 1: 4, 2: n, 3: 2, 4: 2, 5: 4 * n, 6: 4 * n, 7: 4 * n, 8: n, 9: n, 10: 4, 11: 4, 12: 4, 13: 4}
-    pages |= {14: 2 * n, 15: 1, 16: 8 * n, 17: 1, 18: 1, 19: 1}
+    # 18: both BF16 gate blocks, 2 KiB per tile each, in 4 KiB pages.
+    pages |= {14: 2 * n, 15: 1, 16: 8 * n, 17: 1, 18: gate_tiles, 19: 1}
     head_tiles = (heads + 31) // 32
-    reader_compile = [head_tiles, columns, grid_x, heads // key_heads, key_heads * 4]
+    reader_compile = [heads, columns, grid_x, heads // key_heads, key_heads * 4, gate_tiles]
     for tensor in tensors:
         reader_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
     writer_compile = [head_tiles, columns, heads, grid_x]

@@ -45,6 +45,21 @@ def _silu_mul(x, z, memory_config, dtype=None):
     return ttnn.multiply(x, s, memory_config=memory_config, dtype=dtype)
 
 
+def _gate_row(tensor, mesh, width):
+    """Per-head row [1, 1, H] on each device -> [1, 1, width], heads at columns 0..H-1 and zeros
+    after, bit for bit: the gates of a verify block run over the whole [a | b] block."""
+    host = ttnn.to_torch(tensor, mesh_composer=ttnn.ConcatMeshToTensor(mesh, dim=0))
+    padded = torch.nn.functional.pad(host, (0, width - host.shape[-1]))
+    return ttnn.from_torch(
+        padded,
+        dtype=tensor.dtype,
+        layout=ttnn.TILE_LAYOUT,
+        device=mesh,
+        mesh_mapper=ttnn.ShardTensorToMesh(mesh, dim=0),
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+    )
+
+
 def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
     """Shard one GDN layer's linear_attn.* weights across the mesh."""
     tp = args.num_devices
@@ -167,6 +182,9 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
     tw["dt_bias"] = tpc.shard_small(sd[P + "dt_bias"].float(), mesh, c("dt_bias"))
     A_log = tpc.shard_small(sd[P + "A_log"].float(), mesh, c("A_log"))
     tw["neg_exp_A"] = ttnn.neg(ttnn.exp(A_log))
+    # The same per-head rows over a verify block's [a | b] block (`_verify_gated`).
+    tw["dt_bias_ab"] = _gate_row(tw["dt_bias"], mesh, 2 * nv_per)
+    tw["neg_exp_A_ab"] = _gate_row(tw["neg_exp_A"], mesh, 2 * nv_per)
     tw["norm_w"] = tpc.replicate(sd[P + "norm.weight"].float(), mesh, c("norm_w"))
     # Conv taps (4), sharded per Q/K/V head grouping
     taps = tpc.prepare_conv_taps(conv1d_w, key_dim, nk, dk, nv, dv, args.gdn_conv_kernel_size, tp)
@@ -533,10 +551,12 @@ class TPGatedDeltaNet:
             self.args.gdn_value_dim_tp,
         )
 
-    def _project_qkvzab(self, x, S, out_mc=None):
+    def _project_qkvzab(self, x, S, out_mc=None, split_ab=True):
         """Project x → (qkv, z, a, b). Fused path: one [qkv|z|a|b] matmul then slice.
         out_mc: placement of the qkvzab matmul + slices. None → DRAM; prefill+decode now pass L1 to
-        keep qkvzab + q/k/v/z/a/b resident (was DRAM to spare NoC traffic — re-measure if reverting)."""
+        keep qkvzab + q/k/v/z/a/b resident (was DRAM to spare NoC traffic — re-measure if reverting).
+        split_ab=False (fused path only) returns (qkv, z, ab): the [a | b] block, which
+        verification gates whole."""
         Nv, qz, az = self.Nv, self.qkv_dim_tp, self.qkvz_dim_tp
         _proj_mc = out_mc if out_mc is not None else ttnn.DRAM_MEMORY_CONFIG
         if self._fuse_ab:
@@ -574,6 +594,8 @@ class TPGatedDeltaNet:
             _ab_end = min(az + -(-2 * Nv // tpc.TILE_SIZE) * tpc.TILE_SIZE, qkvzab.shape[-1])  # 2*Nv up to a tile
             ab = ttnn.slice(qkvzab, (0, 0, az), (1, S, _ab_end), memory_config=out_mc)
             ttnn.deallocate(qkvzab)
+            if not split_ab:
+                return qkv, z, ab
             a = ttnn.slice(ab, (0, 0, 0), (1, S, Nv), memory_config=out_mc)
             b = ttnn.slice(ab, (0, 0, Nv), (1, S, 2 * Nv), memory_config=out_mc)
             ttnn.deallocate(ab)
@@ -1191,7 +1213,7 @@ class TPGatedDeltaNet:
         count = x.shape[-2]
         assert self.B == 1 and 1 <= count <= 32
         x = ttnn.reshape(x, (1, count, x.shape[-1]))
-        projected = self._project_qkvzab(x, count, out_mc=ttnn.L1_MEMORY_CONFIG)
+        projected = self._project_qkvzab(x, count, out_mc=ttnn.L1_MEMORY_CONFIG, split_ab=False)
         gated = self._verify_gated(projected, snapshots, history)
         for tensor in projected:
             ttnn.deallocate(tensor)
@@ -1199,20 +1221,19 @@ class TPGatedDeltaNet:
 
     def _verify_gated(self, projected, snapshots, history):
         """Convolve the block and write its tap history, then advance the checkpoint in one
-        recurrent program that normalizes q and k itself."""
-        qkv, z, a, b = projected
+        recurrent program that normalizes q and k itself. The gates run over the whole [a | b]
+        block: head h's decay is column h of g and its beta column Nv + h of beta."""
+        qkv, z, ab = projected
         count = qkv.shape[-2]
         memory = ttnn.L1_MEMORY_CONFIG
         activated = verify_conv(qkv, self.conv_states, self.tw["conv_diag"], self.tw["conv_select"], history)
-        nv = self.Nv
-        beta = ttnn.typecast(ttnn.reshape(ttnn.sigmoid(b, memory_config=memory), (count, 1, nv)), ttnn.float32)
-        g = ttnn.multiply(self.tw["neg_exp_A"], _softplus_add(a, self.tw["dt_bias"]), memory_config=memory)
-        g = ttnn.typecast(ttnn.reshape(g, (count, 1, nv)), ttnn.float32)
+        beta = ttnn.sigmoid(ab, memory_config=memory)
+        g = ttnn.multiply(self.tw["neg_exp_A_ab"], _softplus_add(ab, self.tw["dt_bias_ab"]), memory_config=memory)
         output = verify_recurrence(activated, g, beta, self.rec_state, snapshots, self.Nk, self.scale)
         for tensor in (activated, g, beta):
             ttnn.deallocate(tensor)
         normalized = ttnn.rms_norm(
-            ttnn.reshape(output, (count, nv, self.Dv)), weight=self.tw["norm_w"], epsilon=1e-6, memory_config=memory
+            ttnn.reshape(output, (count, self.Nv, self.Dv)), weight=self.tw["norm_w"], epsilon=1e-6, memory_config=memory
         )
         ttnn.deallocate(output)
         gated = _silu_mul(ttnn.reshape(normalized, (1, count, self.value_dim_tp)), z, memory)
