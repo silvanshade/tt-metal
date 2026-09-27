@@ -4,10 +4,9 @@
 """Decode matmul layout selection in Qwen38ModelArgs — host only, no device.
 
 QWEN38_DECODE_MATMUL picks the arm for every decode projection; QWEN38_QKVZAB_LAYOUT overrides it
-for the GDN [dim, qkvzab] in-projection alone. The shape's padded width is 520 tiles, so 520/8 banks
-is odd and the sharded builder drops it to one reader per bank: measured on p150a at 23K the 48
-sharded in-projections read at 165.1 GB/s against 274 GB/s on the 1D arm, so the override defaults
-to 1d while keeping the sharded arm reachable for a later two-reader measurement.
+for the GDN [dim, qkvzab] in-projection alone. Unset, it follows the readers per DRAM bank the
+shape admits (model_config.qkvzab_default_layout): at TP=1 the padded width is 65 tiles per bank,
+one reader, and the shape stays 1D; at TP=2 it is 33 tiles per bank, three readers, and it shards.
 
 Runs on a stub mesh: _init_tp_config reads the device only for its shape, device count and worker
 grid width, and every config it builds is a host-side object.
@@ -35,12 +34,14 @@ class _StubGrid:
 
 
 class _StubMesh:
-    """Single-device mesh stand-in for _init_tp_config."""
+    """Mesh stand-in for _init_tp_config: a 1 x `devices` row of P150s."""
 
-    shape = (1, 1)
+    def __init__(self, devices):
+        self.shape = (1, devices)
+        self._devices = devices
 
     def get_num_devices(self):
-        return 1
+        return self._devices
 
     def compute_with_storage_grid_size(self):
         return _StubGrid()
@@ -52,14 +53,15 @@ def args():
     return Qwen38ModelArgs(mesh_device=None)
 
 
-def configure(args, monkeypatch, decode_matmul=None, qkvzab=None):
-    """Rebuild the TP config with the two layout variables set (None = unset)."""
+def configure(args, monkeypatch, decode_matmul=None, qkvzab=None, tp=1):
+    """Rebuild the TP config at `tp` devices with the two layout variables set (None = unset)."""
     for name, value in (("QWEN38_DECODE_MATMUL", decode_matmul), ("QWEN38_QKVZAB_LAYOUT", qkvzab)):
         if value is None:
             monkeypatch.delenv(name, raising=False)
         else:
             monkeypatch.setenv(name, value)
-    args._init_tp_config(_StubMesh())
+    monkeypatch.setattr(args, "num_devices", tp)
+    args._init_tp_config(_StubMesh(tp))
     return args
 
 
@@ -78,6 +80,14 @@ def test_override_restores_the_sharded_arm_for_qkvzab(args, monkeypatch):
     assert args.gdn_qkvzab_1d_decode is False
     assert args.gdn_qkvzab_weight_memcfg.memory_layout == ttnn.TensorMemoryLayout.WIDTH_SHARDED
     assert args.gdn_qkvzab_progcfg.num_workers_per_dram_bank == 1
+
+
+def test_qkvzab_shards_by_default_where_three_readers_fit(args, monkeypatch):
+    """TP=2, unset: 33 tiles per bank admit three readers, so qkvzab takes the sharded arm."""
+    configure(args, monkeypatch, tp=2)
+    assert args.gdn_qkvzab_layout == "dram_sharded"
+    assert args.gdn_qkvzab_1d_decode is False
+    assert args.gdn_qkvzab_progcfg.num_workers_per_dram_bank == 3
 
 
 @pytest.mark.parametrize("qkvzab", [None, "1d", "dram_sharded"])

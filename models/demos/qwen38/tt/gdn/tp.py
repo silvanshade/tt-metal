@@ -104,8 +104,8 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
         )
         # gdn_qkvzab_1d_decode: interleaved weight (fast small-grid 1D decode matmul; prefill AGMM
         # verified bit-identical on interleaved). Distinct cache suffix. This shape has its own arm
-        # (QWEN38_QKVZAB_LAYOUT, model_config.DEFAULT_QKVZAB_LAYOUT), so it does not read
-        # proj_1d_decode: under the dram_sharded default it is the one shape that stays interleaved.
+        # (QWEN38_QKVZAB_LAYOUT, model_config.qkvzab_default_layout), so it does not read
+        # proj_1d_decode: at TP=1 it is the one shape that stays interleaved under the dram_sharded default.
         _proj1d = getattr(args, "gdn_qkvzab_1d_decode", getattr(args, "proj_1d_decode", False))
         tw["qkvz"] = tpc.shard_w(
             fused,

@@ -108,14 +108,21 @@ def create_dram_sharded_mem_config(k, n):
     )
 
 
+def dram_sharded_readers(n, requested):
+    """Readers per DRAM bank for a DRAM-sharded [*, n] weight: `requested` if it divides the bank's
+    output width in tiles, else the most readers that do, up to the kernel's limit of 3."""
+    per_bank = _roundup(n, TILE_SIZE * DRAM_CORES) // TILE_SIZE // DRAM_CORES
+    return next(w for w in (requested, 3, 2, 1) if 1 <= w <= 3 and per_bank % w == 0)
+
+
 def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None, num_workers_per_dram_bank=1):
     """DRAM-sharded matmul program config (decode, small M).
 
     `in0_block_w` is the widest legal block: it must divide the per-core activation width in tiles,
     `k_tiles / num_cores`. Width dominates the measured rate — at `in0_block_w=1` the sharded matmul
     runs below the interleaved 1D kernel, at the widest legal block it runs 1.4-1.5x above it
-    (tests/test_decode_matmul_layout_sweep.py). A second reader per bank is worth a further ~1.25x,
-    and is legal only where the per-bank output width in tiles is even.
+    (tests/test_decode_matmul_layout_sweep.py). A second reader per bank is worth a further ~1.25x;
+    readers must divide the per-bank output width in tiles (`dram_sharded_readers`).
     """
     m_tiles = math.ceil(m / TILE_SIZE)
     k_tiles = math.ceil(k / TILE_SIZE)
@@ -132,7 +139,7 @@ def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None, num_worke
         num_cores = 1
     in0_block_w = _find_largest_divisor(k_tiles_per_core, max_div=k_tiles_per_core)
     per_core_N = n_tiles // num_cores if n_tiles >= num_cores else 1
-    workers = num_workers_per_dram_bank if (n_tiles // DRAM_CORES) % num_workers_per_dram_bank == 0 else 1
+    workers = dram_sharded_readers(n, num_workers_per_dram_bank)
 
     return ttnn.MatmulMultiCoreReuseMultiCastDRAMShardedProgramConfig(
         in0_block_w=in0_block_w,

@@ -23,12 +23,17 @@ GDN_CONV1D_L1_SMALL_SIZE = 24576
 DEFAULT_DECODE_MATMUL = "dram_sharded"
 
 # Decode layout for the GDN [dim, qkvzab] in-projection when QWEN38_QKVZAB_LAYOUT is unset; it
-# overrides DEFAULT_DECODE_MATMUL for this one shape. Its padded width is 520 tiles, so 520/8 banks
-# = 65 is odd and create_dram_sharded_matmul_program_config drops it to one reader per bank: on
-# p150a at 23K the 48 sharded in-projections then read at 165.1 GB/s against 274 GB/s on the 1D arm
-# they replaced, +5.455 ms on the ordinary decode step. The sharded arm stays reachable with
-# QWEN38_QKVZAB_LAYOUT=dram_sharded so a two-reader arm can be measured for this shape.
-DEFAULT_QKVZAB_LAYOUT = "1d"
+# overrides DEFAULT_DECODE_MATMUL for this one shape. The sharded arm needs two or more readers per
+# DRAM bank. At TP=1 the padded width is 520 tiles, 65 per bank, which admits one reader: on p150a at
+# 23K the 48 sharded in-projections then read at 165.1 GB/s against 274 GB/s on the 1D arm, +5.455 ms
+# on the ordinary decode step. At TP=2 it is 264 tiles, 33 per bank, which admits three readers: the
+# sharded in-projection runs 59.6 us against 89.9 us on the 1D arm (151.4 us at one reader), at the
+# same error against an fp32 product (0.46% vs 0.44% relative RMS), and the captured DFlash2 round at
+# 4K drops 53.8 -> 52.4 ms. So the default follows the reader count (`qkvzab_default_layout`).
+def qkvzab_default_layout(qkvzab_dim_tp: int, workers: int) -> str:
+    from models.demos.qwen38.tt import tp_common as tpc
+
+    return "dram_sharded" if tpc.dram_sharded_readers(qkvzab_dim_tp, workers) > 1 else "1d"
 
 
 class Qwen38ModelArgs(ModelArgs):
@@ -193,15 +198,17 @@ class Qwen38ModelArgs(ModelArgs):
             raise ValueError(f"QWEN38_DECODE_MATMUL must be '1d' or 'dram_sharded', got {_layout!r}")
         self.decode_matmul_layout = _layout
         _dram_sharded = _layout == "dram_sharded"
-        # Readers per DRAM bank in the sharded kernel; the builder drops to 1 where the per-bank
-        # output width in tiles is odd (gdn_qkvzab).
+        # Readers per DRAM bank in the sharded kernel; the builder lowers it to the most readers that
+        # divide the per-bank output width in tiles (tp_common.dram_sharded_readers).
         self.dram_sharded_workers = max(1, int(os.environ.get("QWEN38_DRAM_SHARDED_WORKERS", "2")))
         _w = self.dram_sharded_workers
         # Per-shape override for the GDN qkvzab in-projection (QWEN38_DRAM_SHARDED_WORKERS is global;
         # this one shape needs its own arm). It selects within the dram_sharded arm only: the 1d arm
         # already runs every shape interleaved, so the effective layout there is "1d" whatever the
-        # override says. See DEFAULT_QKVZAB_LAYOUT for the measurement that sets the default.
-        _qkvzab = os.environ.get("QWEN38_QKVZAB_LAYOUT", DEFAULT_QKVZAB_LAYOUT).strip().lower()
+        # override says. See qkvzab_default_layout for the measurement that sets the default.
+        _qkvzab = (
+            os.environ.get("QWEN38_QKVZAB_LAYOUT", qkvzab_default_layout(self.gdn_qkvzab_dim_tp, _w)).strip().lower()
+        )
         if _qkvzab not in ("1d", "dram_sharded"):
             raise ValueError(f"QWEN38_QKVZAB_LAYOUT must be '1d' or 'dram_sharded', got {_qkvzab!r}")
         self.gdn_qkvzab_layout = _qkvzab if _dram_sharded else "1d"
