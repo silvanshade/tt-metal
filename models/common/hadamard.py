@@ -158,7 +158,8 @@ def hadamard_rotate(tensor, stage, dtype=None):
     grid = device.compute_with_storage_grid_size()
     split, group_tiles, workers = _partition(blocks, tiles, grid.x * grid.y)
     coordinates = [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(workers)]
-    cores = ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in coordinates])
+    # Whole rows plus one partial row: dispatch multicasts per rectangle, not per core.
+    cores = ttnn.num_cores_to_corerangeset(workers, grid, True)
     read_args, write_args, compute_args = ttnn.RuntimeArgs(), ttnn.RuntimeArgs(), ttnn.RuntimeArgs()
     groups, first = blocks * split, 0
     for index, core in enumerate(coordinates):
