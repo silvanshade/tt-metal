@@ -30,8 +30,14 @@ class GDNVerification:
         self.max_tokens = max_tokens
         self.slot = -1
         self.count = 0
-        self.checkpoint = self._allocate((1, layer.Nv, layer.Dk, layer.Dv), ttnn.float32)
-        self.checkpoint_convs = [self._allocate((1, 1, layer.qkv_dim_tp), ttnn.bfloat16) for _ in range(layer.K)]
+        # One FP32 slot: verification only reads committed state and the fold rewrites it from
+        # snapshots and history (whose first rows are the checkpoint taps), so the committed
+        # buffers serve as the checkpoint and preparation copies nothing.
+        self.aliased = layer.B == 1 and layer.rec_state.dtype == ttnn.float32
+        self.checkpoint = None if self.aliased else self._allocate((1, layer.Nv, layer.Dk, layer.Dv), ttnn.float32)
+        self.checkpoint_convs = (
+            None if self.aliased else [self._allocate((1, 1, layer.qkv_dim_tp), ttnn.bfloat16) for _ in range(layer.K)]
+        )
         self.snapshots = self._allocate((max_tokens, layer.Nv, layer.Dk, layer.Dv), ttnn.float32)
         self.histories = {
             count: self._allocate((1, layer.K + count, layer.qkv_dim_tp), ttnn.bfloat16)
@@ -54,7 +60,8 @@ class GDNVerification:
         if self._released:
             return
         staging = () if self.staging is None else (self.staging,)
-        for tensor in (self.checkpoint, self.snapshots, *self.checkpoint_convs, *self.histories.values(), *staging):
+        owned = () if self.aliased else (self.checkpoint, *self.checkpoint_convs)
+        for tensor in (*owned, self.snapshots, *self.histories.values(), *staging):
             ttnn.deallocate(tensor)
         self._released = True
         self.count = 0
@@ -102,6 +109,9 @@ class GDNVerification:
         assert self.count == 0 and 0 <= slot < layer.B
         assert layer.rec_state is not None and layer.conv_states is not None and layer._stable_state
         self.slot = slot
+        if self.aliased:
+            self.checkpoint, self.checkpoint_convs = layer.rec_state, layer.conv_states
+            return
         self._checkpoint_row(layer.rec_state, self.checkpoint, 0, slot)
         for source, checkpoint in zip(layer.conv_states, self.checkpoint_convs, strict=True):
             self._checkpoint_row(source, checkpoint, 1, slot)
