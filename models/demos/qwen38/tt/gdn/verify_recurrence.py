@@ -227,7 +227,7 @@ def _accepted_args(accepted: int | ttnn.Tensor) -> tuple[int, ttnn.Tensor | None
     return int(accepted), None
 
 
-def select_state(snapshots, checkpoint, accepted: int | ttnn.Tensor, state, slot: int, cores: int = 32) -> None:
+def select_state(snapshots, checkpoint, accepted: int | ttnn.Tensor, state, slot: int) -> None:
     """Write the state after `accepted` verified rows into `state[slot]`.
 
     requires: FP32 tiled snapshots [T,H,128,128] from verify_recurrence, checkpoint [1,H,128,128] it
@@ -240,8 +240,11 @@ def select_state(snapshots, checkpoint, accepted: int | ttnn.Tensor, state, slot
     fixed, count = _accepted_args(accepted)
     count = count if count is not None else checkpoint  # unread placeholder keeps the accessor valid
     device = state.device()
+    # Latency-bound: spread the pages over the grid so each core copies one batch.
+    grid = device.compute_with_storage_grid_size()
+    per = -(-pages // (grid.x * grid.y))
+    cores = -(-pages // per)
     coordinates = _cores(device, cores)
-    per = (pages + cores - 1) // cores
     args = ttnn.RuntimeArgs()
     tensors = (count, snapshots, checkpoint, state)
     for index, core in enumerate(coordinates):
@@ -268,7 +271,7 @@ def select_state(snapshots, checkpoint, accepted: int | ttnn.Tensor, state, slot
     ttnn.generic_op([*tensors], descriptor)
 
 
-def select_rows(history, accepted: int | ttnn.Tensor, taps: list, slot: int, cores: int = 20) -> None:
+def select_rows(history, accepted: int | ttnn.Tensor, taps: list, slot: int) -> None:
     """Write convolution taps after `accepted` verified rows into row `slot` of each tap state.
 
     requires: BF16 tiled history [1, K + T, W] (checkpoint taps then verified inputs, K + T <= 32);
@@ -281,8 +284,12 @@ def select_rows(history, accepted: int | ttnn.Tensor, taps: list, slot: int, cor
     count = count if count is not None else history
     tiles = history.shape[-1] // 32
     device = history.device()
+    # Latency-bound: spread the tiles over the grid; each core's rows share one scratch page.
+    grid = device.compute_with_storage_grid_size()
+    per = -(-tiles // (grid.x * grid.y))
+    assert per <= 8
+    cores = -(-tiles // per)
     coordinates = _cores(device, cores)
-    per = (tiles + cores - 1) // cores
     args = ttnn.RuntimeArgs()
     tensors = (count, history, *taps)
     for index, core in enumerate(coordinates):

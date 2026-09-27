@@ -21,6 +21,7 @@ void forward(Noc& noc, DataflowBuffer& scratch, const Accessor& state, uint32_t 
 // the checkpoint taps followed by the verified inputs, one BF16 row each within a single tile row.
 // Each row moves into row `slot` of tap m's [1, B, width] state, face row by face row.
 // DRAM reads need 64 B alignment, so read the aligned pair of 32 B face rows and forward one.
+// All of a core's reads, then all of its writes, share one barrier each: the fold is latency-bound.
 void kernel_main() {
     const uint32_t fixed = get_arg_val<uint32_t>(0);  // accepted count, or ~0u to read `count`
     const uint32_t slot = get_arg_val<uint32_t>(1);
@@ -48,6 +49,9 @@ void kernel_main() {
         std::memcpy(&value, reinterpret_cast<const void*>(get_write_ptr(0)), sizeof(value));
         accepted = static_cast<uint32_t>(value + 0.5f);
     }
+    const auto local = [&](uint32_t tile, uint32_t m, uint32_t face) {
+        return ((tile - begin) * 8 + m * 2 + face) * 64 + (row_offset(accepted + m, face) & 63u);
+    };
     for (uint32_t tile = begin; tile < end; ++tile) {
         for (uint32_t m = 0; m < 4; ++m) {
             for (uint32_t face = 0; face < 2; ++face) {
@@ -56,17 +60,18 @@ void kernel_main() {
                     scratch,
                     64,
                     {.page_id = tile, .offset_bytes = row_offset(accepted + m, face) & ~63u},
-                    {.offset_bytes = (m * 2 + face) * 64});
+                    {.offset_bytes = ((tile - begin) * 8 + m * 2 + face) * 64});
             }
         }
-        noc.async_read_barrier();
-        for (uint32_t face = 0; face < 2; ++face) {
-            const auto local = [&](uint32_t m) { return (m * 2 + face) * 64 + (row_offset(accepted + m, face) & 63u); };
-            forward(noc, scratch, state0, tile, local(0), slot, face);
-            forward(noc, scratch, state1, tile, local(1), slot, face);
-            forward(noc, scratch, state2, tile, local(2), slot, face);
-            forward(noc, scratch, state3, tile, local(3), slot, face);
-        }
-        noc.async_write_barrier();
     }
+    noc.async_read_barrier();
+    for (uint32_t tile = begin; tile < end; ++tile) {
+        for (uint32_t face = 0; face < 2; ++face) {
+            forward(noc, scratch, state0, tile, local(tile, 0, face), slot, face);
+            forward(noc, scratch, state1, tile, local(tile, 1, face), slot, face);
+            forward(noc, scratch, state2, tile, local(tile, 2, face), slot, face);
+            forward(noc, scratch, state3, tile, local(tile, 3, face), slot, face);
+        }
+    }
+    noc.async_write_barrier();
 }
