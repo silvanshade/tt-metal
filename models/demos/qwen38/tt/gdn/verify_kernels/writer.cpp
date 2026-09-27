@@ -6,16 +6,18 @@
 #include "api/tensor/noc_traits.h"
 
 void kernel_main() {
-    const uint32_t head = get_arg_val<uint32_t>(0);
-    const uint32_t rows = get_arg_val<uint32_t>(1);
-    const uint32_t first = get_arg_val<uint32_t>(2);
     constexpr uint32_t head_tiles = get_compile_time_arg_val(0);
     constexpr uint32_t columns = get_compile_time_arg_val(1);
     constexpr uint32_t heads = get_compile_time_arg_val(2);
-    constexpr auto oa = TensorAccessorArgs<3>();
+    constexpr uint32_t grid_x = get_compile_time_arg_val(3);
+    constexpr auto oa = TensorAccessorArgs<4>();
     constexpr auto sa = TensorAccessorArgs<oa.next_compile_time_args_offset()>();
-    const auto output = TensorAccessor(oa, get_arg_val<uint32_t>(3), 4096);
-    const auto snapshots = TensorAccessor(sa, get_arg_val<uint32_t>(4), 4096);
+    const uint32_t core = get_absolute_logical_y() * grid_x + get_absolute_logical_x();
+    const uint32_t head = core / (4 / columns);
+    const uint32_t first = core % (4 / columns) * columns;
+    const uint32_t rows = get_common_arg_val<uint32_t>(0);
+    const auto output = TensorAccessor(oa, get_common_arg_val<uint32_t>(1), 4096);
+    const auto snapshots = TensorAccessor(sa, get_common_arg_val<uint32_t>(2), 4096);
     Noc noc;
     const uint32_t offset = (((head % 32) / 16) * 512 + (head % 16) * 16) * 4;
     for (uint32_t row = 0; row < rows; ++row) {

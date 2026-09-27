@@ -40,7 +40,7 @@ void matmul(uint32_t a, uint32_t b, uint32_t out, uint32_t n, uint32_t k) {
 // so the delta it scales is zero on every other row and K^T @ delta is k_r^T delta_r.
 // Every row's state block leaves through CB 16; the host selects any accepted prefix from those.
 void kernel_main() {
-    const uint32_t rows = get_arg_val<uint32_t>(0);
+    const uint32_t rows = get_common_arg_val<uint32_t>(0);
     constexpr uint32_t n = get_compile_time_arg_val(0);
     constexpr uint32_t blocks = 4 * n;
     compute_kernel_hw_startup(kK, kKT);

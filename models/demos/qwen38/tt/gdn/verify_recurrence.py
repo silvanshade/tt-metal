@@ -21,8 +21,10 @@ def _cores(device, count: int) -> list[ttnn.CoreCoord]:
     return [ttnn.CoreCoord(i % grid.x, i // grid.x) for i in range(count)]
 
 
-def _core_set(coordinates: list[ttnn.CoreCoord]) -> ttnn.CoreRangeSet:
-    return ttnn.CoreRangeSet([ttnn.CoreRange(c, c) for c in coordinates])
+def _core_set(device, count: int) -> ttnn.CoreRangeSet:
+    """The first `count` cores of the row-major grid, as whole rows plus one partial row: dispatch
+    multicasts binaries and configuration per rectangle, not per core."""
+    return ttnn.num_cores_to_corerangeset(count, device.compute_with_storage_grid_size(), True)
 
 
 def _cbs(cores: ttnn.CoreRangeSet, pages: dict[int, int], dtype: ttnn.DataType, page_size: int) -> list:
@@ -66,22 +68,18 @@ def verify_recurrence(q, k, v, g, beta, state, snapshots):
     )
     split = _split(device, heads)
     columns = 4 // split
-    coordinates = _cores(device, heads * split)
-    cores = _core_set(coordinates)
-    reader_args, writer_args, compute_args = ttnn.RuntimeArgs(), ttnn.RuntimeArgs(), ttnn.RuntimeArgs()
-    for index, core in enumerate(coordinates):
-        head, first = index // split, (index % split) * columns
-        reader_args[core.x][core.y] = [head, rows, first, *(t.buffer_address() for t in tensors)]
-        writer_args[core.x][core.y] = [head, rows, first, output.buffer_address(), snapshots.buffer_address()]
-        compute_args[core.x][core.y] = [rows]
+    cores = _core_set(device, heads * split)
+    # Core i of the row-major grid owns value-column block i; kernels derive it from their
+    # coordinates, so every argument is common and dispatch writes it once per kernel.
+    grid_x = device.compute_with_storage_grid_size().x
     n = columns
     pages = {0: 4, 1: 4, 2: n, 3: 2, 4: 2, 5: 4 * n, 6: 4 * n, 7: 4 * n, 8: n, 9: n, 10: 4, 14: 2 * n, 15: 1}
     pages |= {16: 8 * n, 18: 1}
     head_tiles = (heads + 31) // 32
-    reader_compile = [head_tiles, columns]
+    reader_compile = [head_tiles, columns, grid_x]
     for tensor in tensors:
         reader_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
-    writer_compile = [head_tiles, columns, heads]
+    writer_compile = [head_tiles, columns, heads, grid_x]
     for tensor in (output, snapshots):
         writer_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
     kernels = Path(__file__).with_name("verify_kernels")
@@ -91,21 +89,21 @@ def verify_recurrence(q, k, v, g, beta, state, snapshots):
                 kernel_source=str(kernels / "reader.cpp"),
                 core_ranges=cores,
                 compile_time_args=reader_compile,
-                runtime_args=reader_args,
+                common_runtime_args=[rows, *(t.buffer_address() for t in tensors)],
                 config=ttnn.ReaderConfigDescriptor(),
             ),
             ttnn.KernelDescriptor(
                 kernel_source=str(kernels / "writer.cpp"),
                 core_ranges=cores,
                 compile_time_args=writer_compile,
-                runtime_args=writer_args,
+                common_runtime_args=[rows, output.buffer_address(), snapshots.buffer_address()],
                 config=ttnn.WriterConfigDescriptor(),
             ),
             ttnn.KernelDescriptor(
                 kernel_source=str(kernels / "compute.cpp"),
                 core_ranges=cores,
                 compile_time_args=[columns],
-                runtime_args=compute_args,
+                common_runtime_args=[rows],
                 config=ttnn.ComputeConfigDescriptor(
                     math_fidelity=ttnn.MathFidelity.HiFi2, fp32_dest_acc_en=True, math_approx_mode=False
                 ),
@@ -150,7 +148,7 @@ def select_state(snapshots, checkpoint, accepted: int | ttnn.Tensor, state, slot
     compile_args = [pages, batch]
     for tensor in tensors:
         compile_args.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
-    core_set = _core_set(coordinates)
+    core_set = _core_set(device, cores)
     descriptor = ttnn.ProgramDescriptor(
         kernels=[
             ttnn.KernelDescriptor(
@@ -190,7 +188,7 @@ def select_rows(history, accepted: int | ttnn.Tensor, taps: list, slot: int, cor
     compile_args = []
     for tensor in tensors:
         compile_args.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
-    core_set = _core_set(coordinates)
+    core_set = _core_set(device, cores)
     descriptor = ttnn.ProgramDescriptor(
         kernels=[
             ttnn.KernelDescriptor(

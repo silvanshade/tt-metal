@@ -54,23 +54,26 @@ uint32_t scalar(Noc& noc, const Accessor& tensor, uint32_t page, uint32_t col) {
 }  // namespace
 
 void kernel_main() {
-    const uint32_t head = get_arg_val<uint32_t>(0);
-    const uint32_t rows = get_arg_val<uint32_t>(1);
-    const uint32_t first = get_arg_val<uint32_t>(2);
     constexpr uint32_t head_tiles = get_compile_time_arg_val(0);
     constexpr uint32_t columns = get_compile_time_arg_val(1);
-    constexpr auto qa = TensorAccessorArgs<2>();
+    constexpr uint32_t grid_x = get_compile_time_arg_val(2);
+    constexpr auto qa = TensorAccessorArgs<3>();
     constexpr auto ka = TensorAccessorArgs<qa.next_compile_time_args_offset()>();
     constexpr auto va = TensorAccessorArgs<ka.next_compile_time_args_offset()>();
     constexpr auto ga = TensorAccessorArgs<va.next_compile_time_args_offset()>();
     constexpr auto ba = TensorAccessorArgs<ga.next_compile_time_args_offset()>();
     constexpr auto sa = TensorAccessorArgs<ba.next_compile_time_args_offset()>();
-    const auto q = TensorAccessor(qa, get_arg_val<uint32_t>(3), 4096);
-    const auto k = TensorAccessor(ka, get_arg_val<uint32_t>(4), 4096);
-    const auto v = TensorAccessor(va, get_arg_val<uint32_t>(5), 4096);
-    const auto g = TensorAccessor(ga, get_arg_val<uint32_t>(6), 4096);
-    const auto beta = TensorAccessor(ba, get_arg_val<uint32_t>(7), 4096);
-    const auto state = TensorAccessor(sa, get_arg_val<uint32_t>(8), 4096);
+    // Arguments are shared by every core; core i of the row-major grid owns block i.
+    const uint32_t core = get_absolute_logical_y() * grid_x + get_absolute_logical_x();
+    const uint32_t head = core / (4 / columns);
+    const uint32_t first = core % (4 / columns) * columns;
+    const uint32_t rows = get_common_arg_val<uint32_t>(0);
+    const auto q = TensorAccessor(qa, get_common_arg_val<uint32_t>(1), 4096);
+    const auto k = TensorAccessor(ka, get_common_arg_val<uint32_t>(2), 4096);
+    const auto v = TensorAccessor(va, get_common_arg_val<uint32_t>(3), 4096);
+    const auto g = TensorAccessor(ga, get_common_arg_val<uint32_t>(4), 4096);
+    const auto beta = TensorAccessor(ba, get_common_arg_val<uint32_t>(5), 4096);
+    const auto state = TensorAccessor(sa, get_common_arg_val<uint32_t>(6), 4096);
     Noc noc;
     // Initial state column block, (row tile, column) order. It gets its own CB: the resident state
     // CB is produced by the packer, whose private push count would overwrite this core's.
