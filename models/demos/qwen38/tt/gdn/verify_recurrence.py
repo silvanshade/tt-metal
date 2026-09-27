@@ -1,13 +1,18 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Sequential token recurrence in one device program, and accepted-prefix selection.
+"""Verify-block convolution, sequential token recurrence in one device program, and accepted-prefix
+selection.
 
+Convolution keeps every block row on its own tile row, so verification reads whole tiles.
 Verification advances every value-column block of every head in parallel and writes the state after
 each row. Folding an accepted prefix then selects one snapshot and one window of convolution rows,
 so its cost does not depend on how many rows were accepted.
 """
 
+import struct
 from pathlib import Path
+
+import torch
 
 import ttnn
 
@@ -48,23 +53,121 @@ def _split(device, heads: int) -> int:
     return next(split for split in (4, 2, 1) if heads * split <= grid.x * grid.y)
 
 
-def verify_recurrence(q, k, v, g, beta, state, snapshots):
+def conv_constants(taps: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Selectors [9, 32, 32] and tap diagonals [4, 32, W] for `verify_conv`, from four [W] taps.
+
+    Selector m < 4 places tap state m on row m, selector 4 moves token t to row 4 + t, selector
+    4 + s lifts row t + s to row t. Tile (j, c) of the diagonals is diag(taps[j] over channel tile
+    c), so sharding W on a tile boundary keeps every tile whole.
+    """
+    assert len(taps) == 4
+    selectors = torch.zeros(9, 32, 32)
+    for m in range(4):
+        selectors[m, m, 0] = 1
+    selectors[4, torch.arange(4, 32), torch.arange(28)] = 1
+    for s in range(1, 5):
+        selectors[4 + s, torch.arange(32 - s), torch.arange(s, 32)] = 1
+    width = taps[0].numel()
+    channels = torch.arange(width)
+    diagonals = torch.zeros(4, 32, width)
+    for j, tap in enumerate(taps):
+        diagonals[j, channels % 32, channels] = tap.float()
+    return selectors, diagonals
+
+
+def verify_conv(qkv, states, diagonals, selectors, history):
+    """Causal convolution and SiLU of a verify block; write the block's tap history.
+
+    requires: BF16 tiled qkv [1, T, W] and four BF16 tiled tap states [1, 1, W]; BF16 tiled
+        diagonals [4, 32, W] and selectors [9, 32, 32] from `conv_constants`; BF16 tiled history
+        [1, 4 + T, W]; 4 + T <= 32; interleaved tensors.
+    ensures: history rows are the tap states then the qkv rows; returns FP32 tiled [1, T, W] whose
+        row t is silu(sum_j taps[j] * history[t + j + 1]). Padding rows are finite, outside the result.
+    """
+    rows, width = qkv.shape[-2], qkv.shape[-1]
+    assert len(states) == 4 and 4 + rows <= 32 and width % 32 == 0
+    assert history.shape[-2] == 4 + rows and history.shape[-1] == width
+    device = qkv.device()
+    tensors = (selectors, qkv, *states, diagonals)
+    assert all(t.dtype == ttnn.bfloat16 and t.layout == ttnn.TILE_LAYOUT for t in (*tensors, history))
+    activated = ttnn.empty(
+        qkv.shape, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device, memory_config=ttnn.L1_MEMORY_CONFIG
+    )
+    grid = device.compute_with_storage_grid_size()
+    tiles = width // 32
+    per = -(-tiles // (grid.x * grid.y))
+    cores = _core_set(device, -(-tiles // per))
+    shape = [tiles, per, grid.x]
+    reader_compile = list(shape)
+    for tensor in tensors:
+        reader_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
+    writer_compile = list(shape)
+    for tensor in (history, activated):
+        writer_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
+    kernels = Path(__file__).with_name("conv_kernels")
+    bf16 = _cbs(cores, {0: 9, 1: 10, 2: 8, 3: 1, 4: 2, 5: 4}, ttnn.bfloat16, 2048)
+    descriptor = ttnn.ProgramDescriptor(
+        kernels=[
+            ttnn.KernelDescriptor(
+                kernel_source=str(kernels / "reader.cpp"),
+                core_ranges=cores,
+                compile_time_args=reader_compile,
+                common_runtime_args=[t.buffer_address() for t in tensors],
+                config=ttnn.ReaderConfigDescriptor(),
+            ),
+            ttnn.KernelDescriptor(
+                kernel_source=str(kernels / "writer.cpp"),
+                core_ranges=cores,
+                compile_time_args=writer_compile,
+                common_runtime_args=[history.buffer_address(), activated.buffer_address()],
+                config=ttnn.WriterConfigDescriptor(),
+            ),
+            ttnn.KernelDescriptor(
+                kernel_source=str(kernels / "compute.cpp"),
+                core_ranges=cores,
+                compile_time_args=shape,
+                # Selector and diagonal products are exact only when every mantissa phase runs.
+                config=ttnn.ComputeConfigDescriptor(
+                    math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
+                ),
+            ),
+        ],
+        cbs=bf16 + _cbs(cores, {6: 2}, ttnn.float32, 4096),
+        semaphores=[],
+    )
+    ttnn.generic_op([*tensors, history, activated], descriptor)
+    return activated
+
+
+def _bits(value: float) -> int:
+    return struct.unpack("<I", struct.pack("<f", value))[0]
+
+
+def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scale: float, eps: float = 1e-6):
     """Return every row's output; write the state after each row into `snapshots`.
 
-    requires: normalized/scaled FP32 q, normalized FP32 k, FP32 v [T,1,H,128]; FP32 g/beta [T,1,H];
-        FP32 state [1,H,128,128]; FP32 snapshots [>=T,H,128,128]; interleaved tiled tensors.
-    ensures: each head advances rows in order; `state` is not written; snapshot r holds the state
-        after rows 0..r. No state or token crosses the host boundary. Padding is not part of the result.
+    requires: FP32 activated [1, T, W] from `verify_conv`, W = (2 * key_heads + H) * 128 holding
+        q, k (key heads) then v (value heads); FP32 g/beta [T,1,H]; FP32 state [1,H,128,128]; FP32
+        snapshots [>=T,H,128,128]; value head h reads key head h // (H / key_heads); interleaved tiles.
+    ensures: q and k are L2-normalized (q times `scale`) per row; each head advances rows in order;
+        `state` is not written; snapshot r holds the state after rows 0..r. No state or token crosses
+        the host boundary. Padding is not part of the result.
     """
-    rows, _, heads, width = q.shape
-    assert width == 128 and 1 <= rows <= 32 and snapshots.shape[0] >= rows and snapshots.shape[1] == heads
-    device = q.device()
-    tensors = (q, k, v, g, beta, state)
+    rows, width = activated.shape[-2], activated.shape[-1]
+    heads = state.shape[1]
+    assert width == (2 * key_heads + heads) * 128 and heads % key_heads == 0
+    assert 1 <= rows <= 32 and snapshots.shape[0] >= rows and snapshots.shape[1] == heads
+    device = activated.device()
+    tensors = (activated, g, beta, state)
     assert all(
         t.dtype == ttnn.float32 and t.layout == ttnn.TILE_LAYOUT and not t.is_sharded() for t in (*tensors, snapshots)
     )
     output = ttnn.empty(
-        q.shape, dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device, memory_config=ttnn.DRAM_MEMORY_CONFIG
+        [rows, 1, heads, 128],
+        dtype=ttnn.float32,
+        layout=ttnn.TILE_LAYOUT,
+        device=device,
+        memory_config=ttnn.DRAM_MEMORY_CONFIG,
     )
     split = _split(device, heads)
     columns = 4 // split
@@ -73,10 +176,10 @@ def verify_recurrence(q, k, v, g, beta, state, snapshots):
     # coordinates, so every argument is common and dispatch writes it once per kernel.
     grid_x = device.compute_with_storage_grid_size().x
     n = columns
-    pages = {0: 4, 1: 4, 2: n, 3: 2, 4: 2, 5: 4 * n, 6: 4 * n, 7: 4 * n, 8: n, 9: n, 10: 4, 14: 2 * n, 15: 1}
-    pages |= {16: 8 * n, 18: 1}
+    pages = {0: 4, 1: 4, 2: n, 3: 2, 4: 2, 5: 4 * n, 6: 4 * n, 7: 4 * n, 8: n, 9: n, 10: 4, 11: 4, 12: 4, 13: 4}
+    pages |= {14: 2 * n, 15: 1, 16: 8 * n, 17: 1, 18: 1, 19: 1}
     head_tiles = (heads + 31) // 32
-    reader_compile = [head_tiles, columns, grid_x]
+    reader_compile = [head_tiles, columns, grid_x, heads // key_heads, key_heads * 4]
     for tensor in tensors:
         reader_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
     writer_compile = [head_tiles, columns, heads, grid_x]
@@ -102,7 +205,7 @@ def verify_recurrence(q, k, v, g, beta, state, snapshots):
             ttnn.KernelDescriptor(
                 kernel_source=str(kernels / "compute.cpp"),
                 core_ranges=cores,
-                compile_time_args=[columns],
+                compile_time_args=[columns, _bits(eps), _bits(scale)],
                 common_runtime_args=[rows],
                 config=ttnn.ComputeConfigDescriptor(
                     math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False

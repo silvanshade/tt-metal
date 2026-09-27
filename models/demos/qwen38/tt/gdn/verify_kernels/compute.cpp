@@ -10,9 +10,12 @@
 #include "api/compute/reg_api.h"
 #include "api/compute/cb_api.h"
 #include "api/compute/compute_kernel_api.h"
+#include "api/compute/eltwise_unary/binop_with_scalar.h"
+#include "api/compute/eltwise_unary/rsqrt.h"
 namespace {
 constexpr uint32_t kQ = 0, kK = 1, kV = 2, kDecay = 3, kBeta = 4, kInitial = 5, kState = 6, kDecayed = 7;
-constexpr uint32_t kProjected = 8, kDelta = 9, kKT = 10, kOut = 14, kExp = 15, kSnapshot = 16;
+constexpr uint32_t kProjected = 8, kDelta = 9, kKT = 10, kRawQ = 11, kRawK = 12, kSquares = 13, kOut = 14;
+constexpr uint32_t kExp = 15, kSnapshot = 16, kOnes = 17, kInverse = 19;
 // FP32 tiles in one half of DST.
 constexpr uint32_t kDst = 4;
 
@@ -32,18 +35,82 @@ void matmul(uint32_t a, uint32_t b, uint32_t out, uint32_t n, uint32_t k) {
     }
     cb_push_back(out, n);
 }
+
+// out = raw * scale / sqrt(sum of the row's squares + eps) over the head's 4 tiles: a matmul of the
+// squares against ones broadcasts each row's sum across the row, so no reduce or broadcast op runs.
+void normalize(uint32_t raw, uint32_t out, uint32_t eps, uint32_t scale) {
+    cb_wait_front(raw, 4);
+    cb_reserve_back(kSquares, 4);
+    copy_init(raw);
+    square_tile_init();
+    for (uint32_t t = 0; t < 4; ++t) {
+        tile_regs_acquire();
+        copy_tile(raw, t, 0);
+        square_tile(0);
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_tile(0, kSquares, t);
+        tile_regs_release();
+    }
+    cb_push_back(kSquares, 4);
+
+    cb_wait_front(kSquares, 4);
+    cb_reserve_back(kInverse, 1);
+    tile_regs_acquire();
+    matmul_init(kSquares, kOnes);
+    for (uint32_t t = 0; t < 4; ++t) {
+        matmul_tiles(kSquares, kOnes, t, 0, 0);
+    }
+    binop_with_scalar_tile_init();
+    add_unary_tile(0, eps);
+    rsqrt_tile_init();
+    rsqrt_tile(0);
+    binop_with_scalar_tile_init();
+    mul_unary_tile(0, scale);
+    tile_regs_commit();
+    tile_regs_wait();
+    pack_tile(0, kInverse);
+    tile_regs_release();
+    cb_push_back(kInverse, 1);
+    cb_pop_front(kSquares, 4);
+
+    cb_wait_front(kInverse, 1);
+    cb_reserve_back(out, 4);
+    copy_init(raw);
+    mul_binary_tile_init();
+    for (uint32_t t = 0; t < 4; ++t) {
+        tile_regs_acquire();
+        copy_tile(raw, t, 0);
+        copy_tile(kInverse, 0, 1);
+        mul_binary_tile(0, 1, 0);
+        tile_regs_commit();
+        tile_regs_wait();
+        pack_tile(0, out, t);
+        tile_regs_release();
+    }
+    cb_push_back(out, 4);
+    cb_pop_front(kInverse, 1);
+    cb_pop_front(raw, 4);
+}
 }  // namespace
 
 // One core owns a 128 x (32 * n) value-column block of one head's state. Q, K and V arrive once
-// with token r on row r of their tiles, so K^T is formed once and each row's matmuls read the
-// resident tiles; row r's output is row r of Q @ S. The beta tile carries beta_r on row r only,
-// so the delta it scales is zero on every other row and K^T @ delta is k_r^T delta_r.
-// Every row's state block leaves through CB 16; the host selects any accepted prefix from those.
+// with token r on row r of their tiles (q and k raw, normalized here), so K^T is formed once and
+// each row's matmuls read the resident tiles; row r's output is row r of Q @ S. The beta tile
+// carries beta_r on row r only, so the delta it scales is zero on every other row and K^T @ delta
+// is k_r^T delta_r. Every row's state block leaves through CB 16; the host selects any accepted
+// prefix from those.
 void kernel_main() {
     const uint32_t rows = get_common_arg_val<uint32_t>(0);
     constexpr uint32_t n = get_compile_time_arg_val(0);
+    constexpr uint32_t eps = get_compile_time_arg_val(1);    // FP32 bits
+    constexpr uint32_t scale = get_compile_time_arg_val(2);  // FP32 bits of q's scale
+    constexpr uint32_t one = 0x3F800000;
     constexpr uint32_t blocks = 4 * n;
-    compute_kernel_hw_startup(kK, kKT);
+    compute_kernel_hw_startup(kRawK, kK);
+    cb_wait_front(kOnes, 1);
+    normalize(kRawK, kK, eps, one);
+    normalize(kRawQ, kQ, eps, scale);
 
     cb_wait_front(kK, 4);
     cb_reserve_back(kKT, 4);
@@ -160,4 +227,5 @@ void kernel_main() {
     cb_pop_front(kQ, 4);
     cb_pop_front(kK, 4);
     cb_pop_front(kV, n);
+    cb_pop_front(kOnes, 1);
 }

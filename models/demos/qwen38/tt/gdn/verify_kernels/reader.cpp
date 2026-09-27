@@ -17,27 +17,14 @@ void zero(uint32_t address, uint32_t tiles) {
     noc_async_read_barrier();
 }
 
-// One core owns `tiles` consecutive column tiles (from `first`) of one head. Row r of the CB tiles
-// receives this head's row of token r; rows past the block stay zero so they never reach a sum.
+// Whole tiles `first`.. of the activated block: row t holds token t, so nothing is gathered.
 template <typename Accessor>
-void gather(Noc& noc, const Accessor& tensor, uint32_t cb, uint32_t rows, uint32_t head_tiles, uint32_t head,
-            uint32_t first, uint32_t tiles) {
+void read_tiles(Noc& noc, const Accessor& tensor, uint32_t cb, uint32_t first, uint32_t tiles) {
     DataflowBuffer buffer(cb);
     buffer.reserve_back(tiles);
-    zero(get_write_ptr(cb), tiles);
     DataflowBuffer dest(cb);
-    for (uint32_t row = 0; row < rows; ++row) {
-        const uint32_t page = (row * head_tiles + head / 32) * 4 + first;
-        for (uint32_t t = 0; t < tiles; ++t) {
-            for (uint32_t face = 0; face < 2; ++face) {
-                noc.async_read(
-                    tensor,
-                    dest,
-                    64,
-                    {.page_id = page + t, .offset_bytes = row_offset(head % 32) + face * 1024},
-                    {.offset_bytes = t * 4096 + row_offset(row) + face * 1024});
-            }
-        }
+    for (uint32_t t = 0; t < tiles; ++t) {
+        noc.async_read(tensor, dest, 4096, {.page_id = first + t}, {.offset_bytes = t * 4096});
     }
     noc.async_read_barrier();
     buffer.push_back(tiles);
@@ -57,10 +44,10 @@ void kernel_main() {
     constexpr uint32_t head_tiles = get_compile_time_arg_val(0);
     constexpr uint32_t columns = get_compile_time_arg_val(1);
     constexpr uint32_t grid_x = get_compile_time_arg_val(2);
-    constexpr auto qa = TensorAccessorArgs<3>();
-    constexpr auto ka = TensorAccessorArgs<qa.next_compile_time_args_offset()>();
-    constexpr auto va = TensorAccessorArgs<ka.next_compile_time_args_offset()>();
-    constexpr auto ga = TensorAccessorArgs<va.next_compile_time_args_offset()>();
+    constexpr uint32_t group = get_compile_time_arg_val(3);  // value heads per key head
+    constexpr uint32_t key_tiles = get_compile_time_arg_val(4);  // q (and k) channel tiles
+    constexpr auto xa = TensorAccessorArgs<5>();
+    constexpr auto ga = TensorAccessorArgs<xa.next_compile_time_args_offset()>();
     constexpr auto ba = TensorAccessorArgs<ga.next_compile_time_args_offset()>();
     constexpr auto sa = TensorAccessorArgs<ba.next_compile_time_args_offset()>();
     // Arguments are shared by every core; core i of the row-major grid owns block i.
@@ -68,12 +55,10 @@ void kernel_main() {
     const uint32_t head = core / (4 / columns);
     const uint32_t first = core % (4 / columns) * columns;
     const uint32_t rows = get_common_arg_val<uint32_t>(0);
-    const auto q = TensorAccessor(qa, get_common_arg_val<uint32_t>(1), 4096);
-    const auto k = TensorAccessor(ka, get_common_arg_val<uint32_t>(2), 4096);
-    const auto v = TensorAccessor(va, get_common_arg_val<uint32_t>(3), 4096);
-    const auto g = TensorAccessor(ga, get_common_arg_val<uint32_t>(4), 4096);
-    const auto beta = TensorAccessor(ba, get_common_arg_val<uint32_t>(5), 4096);
-    const auto state = TensorAccessor(sa, get_common_arg_val<uint32_t>(6), 4096);
+    const auto activated = TensorAccessor(xa, get_common_arg_val<uint32_t>(1), 4096);
+    const auto g = TensorAccessor(ga, get_common_arg_val<uint32_t>(2), 4096);
+    const auto beta = TensorAccessor(ba, get_common_arg_val<uint32_t>(3), 4096);
+    const auto state = TensorAccessor(sa, get_common_arg_val<uint32_t>(4), 4096);
     Noc noc;
     // Initial state column block, (row tile, column) order. It gets its own CB: the resident state
     // CB is produced by the packer, whose private push count would overwrite this core's.
@@ -88,9 +73,19 @@ void kernel_main() {
     }
     noc.async_read_barrier();
     initial.push_back(4 * columns);
-    gather(noc, k, 1, rows, head_tiles, head, 0, 4);
-    gather(noc, q, 0, rows, head_tiles, head, 0, 4);
-    gather(noc, v, 2, rows, head_tiles, head, first, columns);
+    // Raw q and k of this head's key head (normalized on the compute side), and the owned v block.
+    const uint32_t key = head / group;
+    read_tiles(noc, activated, 11, key * 4, 4);
+    read_tiles(noc, activated, 12, key_tiles + key * 4, 4);
+    read_tiles(noc, activated, 2, 2 * key_tiles + head * 4 + first, columns);
+    // Ones: a matmul against it broadcasts each row's sum across the row.
+    DataflowBuffer ones(17);
+    ones.reserve_back(1);
+    auto* one = reinterpret_cast<volatile uint32_t*>(get_write_ptr(17));
+    for (uint32_t i = 0; i < 1024; ++i) {
+        one[i] = 0x3F800000;
+    }
+    ones.push_back(1);
 
     // Per row: the decay argument broadcast over a tile (exponentiated on the SFPU), and beta on
     // the row's own line of an otherwise zero tile, which also masks the delta to that row.

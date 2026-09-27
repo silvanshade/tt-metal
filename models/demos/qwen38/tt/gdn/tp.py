@@ -13,9 +13,8 @@ import torch
 
 import ttnn
 from models.demos.qwen38.tt import tp_common as tpc
-from models.demos.qwen38.tt.gdn.verify_recurrence import verify_recurrence
+from models.demos.qwen38.tt.gdn.verify_recurrence import conv_constants, verify_conv, verify_recurrence
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_ops import (
-    l2_norm_ttnn,
     recurrent_gated_delta_rule_decode_ttnn,
 )
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_seq import (
@@ -172,6 +171,10 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
     # Conv taps (4), sharded per Q/K/V head grouping
     taps = tpc.prepare_conv_taps(conv1d_w, key_dim, nk, dk, nv, dv, args.gdn_conv_kernel_size, tp)
     tw["conv_taps"] = [tpc.shard_small(taps[j], mesh, c(f"tap{j}")) for j in range(args.gdn_conv_kernel_size)]
+    # Verify convolution as selector and diagonal matmuls (verify_conv).
+    selectors, diagonals = conv_constants(taps)
+    tw["conv_select"] = tpc.replicate(selectors, mesh, c("conv_select"))
+    tw["conv_diag"] = tpc.shard_small(diagonals, mesh, c("conv_diag"))
     # Depthwise conv1d weight [qkv_dim, 1, K], host-held mesh-sharded (dim=0) for prepare_conv_weights /
     # _conv1d_prefill. When gdn_conv_channel_chunks > 1 it is a list of per-device channel-chunk weights
     # (see TPGatedDeltaNet.__init__ for why); chunks=1 keeps the single tensor.
@@ -1195,47 +1198,18 @@ class TPGatedDeltaNet:
         return self._project_decode_output(gated)
 
     def _verify_gated(self, projected, snapshots, history):
-        """Batch convolution and gates; advance the checkpoint in one recurrent program."""
+        """Convolve the block and write its tap history, then advance the checkpoint in one
+        recurrent program that normalizes q and k itself."""
         qkv, z, a, b = projected
-        count, width = qkv.shape[-2], qkv.shape[-1]
+        count = qkv.shape[-2]
         memory = ttnn.L1_MEMORY_CONFIG
-        # Checkpoint taps then this block's inputs, one row each: any accepted prefix's taps.
-        taps = ttnn.concat([*self.conv_states, ttnn.reshape(qkv, (1, count, width))], dim=1, memory_config=memory)
-        ttnn.copy(taps, history)
-        ttnn.deallocate(taps)
-        # Sequence rows occupy separate tiles, so convolution windows never split a tile.
-        qkv = ttnn.reshape(qkv, (count, 1, width))
-        window_source = ttnn.concat([*self.conv_states[1:], qkv], dim=0, memory_config=memory)
-        conv = None
-        for tap in range(self.K):
-            window = ttnn.slice(window_source, (tap, 0, 0), (tap + count, 1, width))
-            previous = conv
-            conv = (
-                ttnn.multiply(window, self.tw["conv_taps"][tap], memory_config=memory)
-                if previous is None
-                else ttnn.mac(window, self.tw["conv_taps"][tap], previous)
-            )
-            ttnn.deallocate(window)
-            if previous is not None:
-                ttnn.deallocate(previous)
-        ttnn.deallocate(window_source)
-        activated = ttnn.silu(conv, memory_config=memory)
-        ttnn.deallocate(conv)
-        kd, nk, nv = self.key_dim_tp, self.Nk, self.Nv
-        q = ttnn.reshape(ttnn.slice(activated, (0, 0, 0), (count, 1, kd)), (count, nk, self.Dk))
-        k = ttnn.reshape(ttnn.slice(activated, (0, 0, kd), (count, 1, 2 * kd)), (count, nk, self.Dk))
-        v = ttnn.reshape(ttnn.slice(activated, (0, 0, 2 * kd), (count, 1, width)), (count, 1, nv, self.Dv))
-        ttnn.deallocate(activated)
-        q = ttnn.reshape(ttnn.repeat_interleave(q, nv // nk, dim=1), (count, 1, nv, self.Dk))
-        k = ttnn.reshape(ttnn.repeat_interleave(k, nv // nk, dim=1), (count, 1, nv, self.Dk))
-        q = ttnn.multiply(l2_norm_ttnn(ttnn.typecast(q, ttnn.float32)), self.scale, memory_config=memory)
-        k = l2_norm_ttnn(ttnn.typecast(k, ttnn.float32))
-        v = ttnn.typecast(v, ttnn.float32)
+        activated = verify_conv(qkv, self.conv_states, self.tw["conv_diag"], self.tw["conv_select"], history)
+        nv = self.Nv
         beta = ttnn.typecast(ttnn.reshape(ttnn.sigmoid(b, memory_config=memory), (count, 1, nv)), ttnn.float32)
         g = ttnn.multiply(self.tw["neg_exp_A"], _softplus_add(a, self.tw["dt_bias"]), memory_config=memory)
         g = ttnn.typecast(ttnn.reshape(g, (count, 1, nv)), ttnn.float32)
-        output = verify_recurrence(q, k, v, g, beta, self.rec_state, snapshots)
-        for tensor in (q, k, v, g, beta):
+        output = verify_recurrence(activated, g, beta, self.rec_state, snapshots, self.Nk, self.scale)
+        for tensor in (activated, g, beta):
             ttnn.deallocate(tensor)
         normalized = ttnn.rms_norm(
             ttnn.reshape(output, (count, nv, self.Dv)), weight=self.tw["norm_w"], epsilon=1e-6, memory_config=memory
