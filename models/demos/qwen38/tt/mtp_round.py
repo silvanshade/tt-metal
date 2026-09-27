@@ -102,7 +102,7 @@ class Qwen38MTPRound:
         positions = ttnn.add(frame["base"], frame["offsets"])
         cos, sin = self._rotations(positions, frame["delta"], count)
         self.verifier.prepare(slot, 0)
-        logits, hidden = self.verifier.verify_prepared(
+        logits, hidden, _ = self.verifier.verify_prepared(
             frame["ids"], cos, sin, self._indices(positions, (count,), ttnn.int32), frame["pages"]
         )
         if "logits" not in frame:

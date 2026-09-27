@@ -552,11 +552,16 @@ class Qwen38MTPVerifier:
         rejected suffix differs from subsequent real input.
     """
 
-    def __init__(self, target: "Qwen38Model", max_tokens: int) -> None:
-        """Allocate every GDN checkpoint and tape before target trace capture."""
+    def __init__(self, target: "Qwen38Model", max_tokens: int, taps: tuple[int, ...] = ()) -> None:
+        """Allocate every GDN checkpoint and tape before target trace capture.
+
+        taps: target layer indices whose outputs verification also returns (DFlash context).
+        """
         assert target.tp_path and 1 <= max_tokens <= 32
+        assert all(0 <= index < len(target.layers) for index in taps)
         self.target = target
         self.max_tokens = max_tokens
+        self.taps = frozenset(taps)
         self.gdn: dict[int, GDNVerification] = {}
         for index, layer in enumerate(target.layers):
             if not layer.is_full_attention:
@@ -588,13 +593,13 @@ class Qwen38MTPVerifier:
         page_table: ttnn.Tensor,
         slot: int,
         start_position: int,
-    ) -> tuple[ttnn.Tensor, ttnn.Tensor]:
-        """Return target logits and final-normalized hidden rows for consecutive tokens.
+    ) -> tuple[ttnn.Tensor, ttnn.Tensor, ttnn.Tensor | None]:
+        """Return target logits, final-normalized hidden rows and tap rows for consecutive tokens.
 
         requires: tokens [T,1], 1 <= T <= max_tokens; positions start at start_position;
             every page-table row names slot's sequence; no pending verification.
         ensures: GDN committed state unchanged; attention suffix remains logically
-            speculative until fold returns next KV position. Caller owns both outputs.
+            speculative until fold returns next KV position. Caller owns every output.
         """
         self.prepare(slot, start_position)
         return self.verify_prepared(token_ids, cos, sin, positions, page_table)
@@ -619,16 +624,20 @@ class Qwen38MTPVerifier:
         sin: ttnn.Tensor,
         positions: ttnn.Tensor,
         page_table: ttnn.Tensor,
-    ) -> tuple[ttnn.Tensor, ttnn.Tensor]:
+    ) -> tuple[ttnn.Tensor, ttnn.Tensor, ttnn.Tensor | None]:
         """Execute the slot-independent verifier from its prepared checkpoint.
 
         requires: prepare completed; 1..max_tokens consecutive input rows.
-        ensures: caller owns logits and hidden rows; fold commits only a chosen prefix.
+        ensures: caller owns logits, hidden rows and taps; fold commits only a chosen prefix.
+            Taps are None without configured tap layers, else the tap layers' outputs
+            concatenated on hidden in layer order, fractured like the residual stream:
+            [1, 1, T, len(taps) * hidden / devices].
         """
         assert self.count == 0 and self.slot >= 0 and 1 <= token_ids.shape[0] <= self.max_tokens
         target = self.target
         x = target.embd(token_ids)
         x = ttnn.reshape(x, (1, 1, x.shape[0] * x.shape[1], x.shape[-1]))
+        kept = []
         for index, layer in enumerate(target.layers):
             output = layer.forward(
                 x,
@@ -639,13 +648,22 @@ class Qwen38MTPVerifier:
                 page_table=page_table,
                 gdn_verification=self.gdn.get(index),
             )
-            ttnn.deallocate(x)
+            if index - 1 not in self.taps:
+                ttnn.deallocate(x)
+            if index in self.taps:
+                kept.append(output)
             x = output
         hidden = target._final_norm_decode(x)
-        ttnn.deallocate(x)
+        if len(target.layers) - 1 not in self.taps:
+            ttnn.deallocate(x)
+        taps = None
+        if kept:
+            taps = ttnn.concat(kept, dim=3)
+            for tensor in kept:
+                ttnn.deallocate(tensor)
         logits = target._lm_head(hidden)
         self.record_replay(token_ids.shape[0])
-        return logits, hidden
+        return logits, hidden, taps
 
     def record_replay(self, count: int) -> None:
         """Restore host fold metadata after successful device verification.
