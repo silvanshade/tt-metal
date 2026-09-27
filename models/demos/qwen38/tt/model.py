@@ -512,11 +512,11 @@ class Qwen38Model:
         """Generator mode-change hook; no-op (no prefetcher)."""
         return None
 
-    def _lm_head(self, x):
-        """LM-head matmul. Vocab-sharded mesh: partial logits + all-gather to full replicated.
-        Single device: plain matmul."""
+    def _lm_head(self, x, gather: bool = True):
+        """LM-head matmul. Vocab-sharded mesh: partial logits, all-gathered to full replicated
+        unless `gather` is False. Single device: plain matmul."""
         logits = ttnn.linear(x, self.lm_head_weight)
-        if self._lmhead_vocab_sharded:
+        if gather and self._lmhead_vocab_sharded:
             from models.tt_transformers.tt.ccl import tt_all_gather
 
             logits = tt_all_gather(

@@ -624,14 +624,16 @@ class Qwen38MTPVerifier:
         sin: ttnn.Tensor,
         positions: ttnn.Tensor,
         page_table: ttnn.Tensor,
+        gather_logits: bool = True,
     ) -> tuple[ttnn.Tensor, ttnn.Tensor, ttnn.Tensor | None]:
         """Execute the slot-independent verifier from its prepared checkpoint.
 
         requires: prepare completed; 1..max_tokens consecutive input rows.
         ensures: caller owns logits, hidden rows and taps; fold commits only a chosen prefix.
-            Taps are None without configured tap layers, else the tap layers' outputs
-            concatenated on hidden in layer order, fractured like the residual stream:
-            [1, 1, T, len(taps) * hidden / devices].
+            Logits are the full vocabulary, replicated, unless `gather_logits` is False, which
+            leaves each device its vocabulary shard. Taps are None without configured tap
+            layers, else the tap layers' outputs concatenated on hidden in layer order,
+            fractured like the residual stream: [1, 1, T, len(taps) * hidden / devices].
         """
         assert self.count == 0 and self.slot >= 0 and 1 <= token_ids.shape[0] <= self.max_tokens
         target = self.target
@@ -661,7 +663,7 @@ class Qwen38MTPVerifier:
             taps = ttnn.concat(kept, dim=3)
             for tensor in kept:
                 ttnn.deallocate(tensor)
-        logits = target._lm_head(hidden)
+        logits = target._lm_head(hidden, gather=gather_logits)
         self.record_replay(token_ids.shape[0])
         return logits, hidden, taps
 

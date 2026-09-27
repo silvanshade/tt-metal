@@ -8,6 +8,7 @@ import torch
 
 import ttnn
 from models.demos.qwen38.tt.dflash import Qwen38DFlash
+from models.demos.qwen38.tt.greedy import greedy_tokens
 from models.demos.qwen38.tt.mtp import Qwen38MTPVerifier
 
 if TYPE_CHECKING:
@@ -73,10 +74,10 @@ class Qwen38DFlashRound:
     def _indices(tensor: ttnn.Tensor, shape: tuple[int, ...], dtype: ttnn.DataType = ttnn.uint32) -> ttnn.Tensor:
         return ttnn.reshape(ttnn.to_layout(ttnn.typecast(tensor, dtype), ttnn.ROW_MAJOR_LAYOUT), shape)
 
-    def _accept(self, tokens: ttnn.Tensor) -> tuple[ttnn.Tensor, ttnn.Tensor]:
-        """Accepted input count (anchor included) and the target token after that prefix."""
+    def _accept(self, predicted: ttnn.Tensor) -> tuple[ttnn.Tensor, ttnn.Tensor]:
+        """Accepted input count (anchor included) and the target token after that prefix, from
+        the target's greedy tokens (FP32 [1, 1, block, 1])."""
         block = self.drafter.block
-        predicted = ttnn.reshape(self._float(tokens), (1, 1, block, 1))
         inputs = ttnn.reshape(self._float(self.frame["ids"]), (1, 1, block, 1))
         accepted = ttnn.clone(self.one)
         prefix = ttnn.clone(self.one)
@@ -105,13 +106,13 @@ class Qwen38DFlashRound:
         )
         self.verifier.prepare(self.slot, 0)
         logits, hidden, taps = self.verifier.verify_prepared(
-            frame["ids"], cos, sin, self._indices(absolute, (block,), ttnn.int32), frame["pages"]
+            frame["ids"], cos, sin, self._indices(absolute, (block,), ttnn.int32), frame["pages"], gather_logits=False
         )
-        valid = ttnn.to_layout(logits[..., : self.target.vocab_size], ttnn.ROW_MAJOR_LAYOUT)
-        tokens = ttnn.reshape(ttnn.argmax(valid, dim=-1, keepdim=True), (block, 1))
-        for tensor in (logits, hidden, valid, cos, sin, rope_index):
+        target = self.target
+        predicted = greedy_tokens(logits, self.mesh, target.tt_ccl, target.args.ccl_topology())
+        for tensor in (logits, hidden, cos, sin, rope_index):
             ttnn.deallocate(tensor)
-        accepted, correction = self._accept(tokens)
+        accepted, correction = self._accept(predicted)
         for verification in self.verifier.gdn.values():
             verification.fold(accepted)
         self.verifier.count, self.verifier.slot = 0, -1
