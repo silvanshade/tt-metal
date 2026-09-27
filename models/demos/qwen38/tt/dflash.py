@@ -37,16 +37,18 @@ class _Projection:
     activation: ttnn.MemoryConfig
 
 
-def _ring_write(source: ttnn.Tensor, ring: ttnn.Tensor, base: ttnn.Tensor) -> None:
-    """Write source rows into ring rows base, base+1, ... (mod ring length).
+def _ring_write(source: ttnn.Tensor, ring: ttnn.Tensor, base: ttnn.Tensor, modulo: int) -> None:
+    """Write source rows into ring rows base, base+1, ... (mod `modulo`).
 
-    requires: BF16 tiled L1 source [1, H, rows<=32, W]; BF16 tiled ring [1, H, R, W], R % 32 == 0;
-        base an FP32 tiled scalar holding a nonnegative integer.
+    requires: BF16 tiled L1 source [1, H, rows<=32, W]; BF16 tiled ring [1, H, L, W], L % 32 == 0;
+        modulo a multiple of 32 no larger than L; base an FP32 tiled scalar holding a nonnegative
+        integer.
     ensures: only the addressed ring rows change.
     """
     _, heads, rows, width = source.shape
-    ring_rows = ring.shape[2]
-    assert rows <= 32 and ring_rows % 32 == 0 and width % 32 == 0 and ring.shape[1] == heads
+    length = ring.shape[2]
+    assert rows <= 32 and length % 32 == 0 and modulo % 32 == 0 and modulo <= length
+    assert width % 32 == 0 and ring.shape[1] == heads
     assert source.memory_config().buffer_type == ttnn.BufferType.L1
     device = ring.device()
     grid = device.compute_with_storage_grid_size()
@@ -55,7 +57,7 @@ def _ring_write(source: ttnn.Tensor, ring: ttnn.Tensor, base: ttnn.Tensor) -> No
     args = ttnn.RuntimeArgs()
     for head, core in enumerate(coordinates):
         args[core.x][core.y] = [head, base.buffer_address(), source.buffer_address(), ring.buffer_address()]
-    compile_args = [rows, ring_rows, width // 32]
+    compile_args = [rows, modulo, length // 32, width // 32]
     for tensor in (base, source, ring):
         compile_args.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
     scratch = 64 + (width // 32) * 2048
@@ -141,6 +143,10 @@ class Qwen38DFlash:
         self.compute, self.precise = compute(matmul_fidelity), compute(ttnn.MathFidelity.HiFi4)
         self.groups = self.hidden // group
         self.ring_rows = self.window + 64
+        # Each ring tensor holds the context ring, then a block slot at row ring_rows for the
+        # drafted block's K/V, padded to whole attention chunks.
+        self.attention_chunk = 128
+        self.ring_length = -(-(self.ring_rows + 32) // self.attention_chunk) * self.attention_chunk
         self.local_heads, self.local_kv = self.heads // self.tp, self.kv_heads // self.tp
         weights = {}
         with safe_open(str(checkpoint / "model.safetensors"), framework="pt") as f:
@@ -238,9 +244,18 @@ class Qwen38DFlash:
             dram(table.float().to(torch.bfloat16), ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT)
             for table in (angles.cos(), angles.sin())
         )
-        block_mask = torch.full((1, 1, 32, 32), float("-inf"))
-        block_mask[..., : self.block] = 0.0
-        self.block_mask = dram(block_mask, ttnn.float32)
+        # Block slot columns: the block's own rows are visible to every block row, padding is not.
+        tail = torch.full((1, 1, 32, self.ring_length - self.ring_rows), float("-inf"))
+        tail[..., : self.block] = 0.0
+        self.block_tail = dram(tail, ttnn.float32)
+        self.block_slot = dram(torch.full((1, 1, 1, 1), float(self.ring_rows)), ttnn.float32)
+        attention_grid = mesh.compute_with_storage_grid_size()
+        self.attention_program = ttnn.SDPAProgramConfig(
+            compute_with_storage_grid_size=(min(8, attention_grid.x), min(8, attention_grid.y)),
+            exp_approx_mode=False,
+            q_chunk_size=0,
+            k_chunk_size=self.attention_chunk,
+        )
         # Device-resident round inputs derive from one FP32 start scalar and the origin scalar.
         self.slot_index = dram(torch.arange(self.ring_rows, dtype=torch.float32).reshape(1, 1, 1, -1), ttnn.float32)
         reach = self.window - 1 - (torch.arange(32) % self.block)
@@ -269,7 +284,7 @@ class Qwen38DFlash:
                     "projection": projection(weights[f"{p}.{conv}.kernel_projection.weight"], None, ttnn.bfloat16),
                     "base": [[vector(weights[f"{p}.{conv}.base_kernel"][h, t]) for t in range(kernel)] for h in range(2)],
                 }
-            zeros = torch.zeros(1, self.kv_heads, self.ring_rows, self.head_dim)
+            zeros = torch.zeros(1, self.kv_heads, self.ring_length, self.head_dim)
             layer["ring"] = tuple(
                 dram(zeros, ttnn.bfloat16, mapper=ttnn.ShardTensorToMesh(mesh, dim=1)) for _ in range(2)
             )
@@ -398,7 +413,7 @@ class Qwen38DFlash:
             )
             for source, ring in zip((keys, values), layer["ring"], strict=True):
                 staged = ttnn.to_memory_config(source, ttnn.L1_MEMORY_CONFIG)
-                _ring_write(staged, ring, base)
+                _ring_write(staged, ring, base, self.ring_rows)
                 ttnn.deallocate(staged)
                 ttnn.deallocate(source)
         ttnn.deallocate(full)
@@ -512,12 +527,20 @@ class Qwen38DFlash:
 
         token_ids: uint32 row-major [8,1] (anchor then mask tokens); positions: uint32 [8,1];
         ring_mask: FP32 [1,1,32,R] from ring_mask().
+
+        Attention is one SDPA-decode call per layer: the block's K/V go to each ring's block
+        slot, and query head h * 8 + t (row t) attends over ring and slot under row t's mask.
         """
         rows = self.block
         h = self.target.embd(token_ids)
         h = ttnn.reshape(h, (1, 1, h.shape[0] * h.shape[1], h.shape[-1]))
         cos, sin = self._rotations(positions)
         scale = self.head_dim**-0.5
+        block_mask = ttnn.typecast(ttnn.concat([ring_mask, self.block_tail], dim=-1), ttnn.bfloat16)
+        mask = ttnn.concat(
+            [block_mask] * (self.local_heads * rows // 32), dim=2, memory_config=ttnn.DRAM_MEMORY_CONFIG
+        )
+        ttnn.deallocate(block_mask)
         for layer in self.layers:
             x = self._norm(h, layer["input_norm"])
             conv = layer["attention_conv"]
@@ -530,28 +553,25 @@ class Qwen38DFlash:
                 ttnn.reshape(self._project(x_conv, layer["v"]), (1, rows, self.local_kv, self.head_dim)), (0, 2, 1, 3)
             )
             ttnn.deallocate(x_conv)
-            per_group = self.local_heads // self.local_kv
-            q = ttnn.reshape(q, (1, self.local_kv, per_group * rows, self.head_dim))
-            k = ttnn.pad(k, [(0, 0), (0, 0), (0, 32 - rows), (0, 0)], 0.0)
-            v = ttnn.pad(v, [(0, 0), (0, 0), (0, 32 - rows), (0, 0)], 0.0)
+            for source, ring in zip((k, v), layer["ring"], strict=True):
+                staged = ttnn.to_memory_config(source, ttnn.L1_MEMORY_CONFIG)
+                _ring_write(staged, ring, self.block_slot, self.ring_length)
+                ttnn.deallocate(staged)
+                ttnn.deallocate(source)
             ring_k, ring_v = layer["ring"]
-            ring_scores = self._matmul(q, ring_k, transpose_b=True, dtype=ttnn.float32)
-            block_scores = self._matmul(q, k, transpose_b=True, dtype=ttnn.float32)
-            scores = ttnn.concat(
-                [
-                    ttnn.add(ttnn.multiply(ring_scores, scale), ring_mask),
-                    ttnn.add(ttnn.multiply(block_scores, scale), self.block_mask),
-                ],
-                dim=-1,
+            queries = ttnn.reshape(q, (1, 1, self.local_heads * rows, self.head_dim))
+            attended = ttnn.transformer.scaled_dot_product_attention_decode(
+                queries,
+                ring_k,
+                ring_v,
+                is_causal=False,
+                attn_mask=mask,
+                scale=scale,
+                program_config=self.attention_program,
+                compute_kernel_config=self.precise,
+                memory_config=ttnn.L1_MEMORY_CONFIG,
             )
-            probabilities = ttnn.typecast(
-                ttnn.softmax(scores, dim=-1, numeric_stable=True, compute_kernel_config=self.precise), ttnn.bfloat16
-            )
-            ring_p = ttnn.slice(probabilities, (0, 0, 0, 0), (1, self.local_kv, 32, self.ring_rows))
-            block_p = ttnn.slice(probabilities, (0, 0, 0, self.ring_rows), (1, self.local_kv, 32, self.ring_rows + 32))
-            attended = ttnn.add(self._matmul(ring_p, ring_v), self._matmul(block_p, v))
-            for tensor in (q, k, v, ring_scores, block_scores, scores, probabilities, ring_p, block_p):
-                ttnn.deallocate(tensor)
+            ttnn.deallocate(q)
             attended = ttnn.reshape(attended, (1, self.local_heads, rows, self.head_dim))
             attended = ttnn.reshape(
                 ttnn.permute(attended, (0, 2, 1, 3)), (1, 1, rows, self.local_heads * self.head_dim)
@@ -581,6 +601,7 @@ class Qwen38DFlash:
             h = ttnn.add(h, out)
             ttnn.deallocate(out)
         ttnn.deallocate(cos)
+        ttnn.deallocate(mask)
         ttnn.deallocate(sin)
         out = self._norm(h, self.norm)
         ttnn.deallocate(h)

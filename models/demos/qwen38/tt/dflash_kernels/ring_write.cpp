@@ -12,15 +12,17 @@ namespace {
 constexpr uint32_t row_offset(uint32_t row, uint32_t face) { return ((row / 16) * 2 + face) * 512 + (row % 16) * 32; }
 }  // namespace
 
-// Scatter `rows` consecutive BF16 rows of one head into a ring of `ring` rows: source row i lands in
-// ring row (base + i) mod ring, where base is a device FP32 scalar. Source [1, H, 32, W] (rows < 32)
-// sits in L1, so half-row reads need no DRAM alignment; each destination half-row is one write.
+// Scatter `rows` consecutive BF16 rows of one head into a ring: source row i lands in ring row
+// (base + i) mod `modulo`, where base is a device FP32 scalar and each head spans `stride` tile
+// rows of the ring tensor. Source [1, H, 32, W] (rows < 32) sits in L1, so half-row reads need no
+// DRAM alignment; each destination half-row is one write.
 void kernel_main() {
     const uint32_t head = get_arg_val<uint32_t>(0);
     constexpr uint32_t rows = get_compile_time_arg_val(0);
-    constexpr uint32_t ring = get_compile_time_arg_val(1);
-    constexpr uint32_t width_tiles = get_compile_time_arg_val(2);
-    constexpr auto ba = TensorAccessorArgs<3>();
+    constexpr uint32_t modulo = get_compile_time_arg_val(1);
+    constexpr uint32_t stride = get_compile_time_arg_val(2);
+    constexpr uint32_t width_tiles = get_compile_time_arg_val(3);
+    constexpr auto ba = TensorAccessorArgs<4>();
     constexpr auto sa = TensorAccessorArgs<ba.next_compile_time_args_offset()>();
     constexpr auto da = TensorAccessorArgs<sa.next_compile_time_args_offset()>();
     const auto base = TensorAccessor(ba, get_arg_val<uint32_t>(1), 4096);
@@ -32,14 +34,14 @@ void kernel_main() {
     noc.async_read_barrier();
     float value;
     std::memcpy(&value, reinterpret_cast<const void*>(get_write_ptr(0)), sizeof(value));
-    const uint32_t first = static_cast<uint32_t>(value + 0.5f) % ring;
+    const uint32_t first = static_cast<uint32_t>(value + 0.5f) % modulo;
     for (uint32_t c = 0; c < width_tiles; ++c) {
         noc.async_read(source, scratch, 2048, {.page_id = head * width_tiles + c}, {.offset_bytes = 64 + c * 2048});
     }
     noc.async_read_barrier();
     for (uint32_t i = 0; i < rows; ++i) {
-        const uint32_t slot = (first + i) % ring;
-        const uint32_t page = (head * (ring / 32) + slot / 32) * width_tiles;
+        const uint32_t slot = (first + i) % modulo;
+        const uint32_t page = (head * stride + slot / 32) * width_tiles;
         for (uint32_t c = 0; c < width_tiles; ++c) {
             for (uint32_t face = 0; face < 2; ++face) {
                 noc.async_write(
