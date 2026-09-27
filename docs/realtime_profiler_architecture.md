@@ -32,20 +32,20 @@ This document describes how the **dispatch core** (dispatch_s), **real-time prof
 |                                                                             |
 |   +---------------------------------------------------------------------+   |
 |   | REAL-TIME PROFILER CORE (Tensix, closest to PCIe)                   |   |
-|   | Kernel: cq_realtime_profiler.cpp                                    |   |
+|   | Kernels: cq_realtime_profiler{,_push}.cpp                            |   |
 |   |                                                                     |   |
 |   |   +---------------+  +-------------------------------------------+  |   |
 |   |   | Mailbox (L1)  |  | Loop:                                     |  |   |
-|   |   | - config_buf  |  |   IDLE + sync_request -> sync(); push     |  |   |
-|   |   |   _addr       |  |   PUSH_A -> NOC read buf A -> D2H push    |  |   |
-|   |   | - state (R/W) |  |   PUSH_B -> NOC read buf B -> D2H push    |  |   |
-|   |   | - sync_req    |  |   TERMINATE -> exit                       |  |   |
+|   |   | - config_buf  |  |   unchanged state + sync_request -> sync  |  |   |
+|   |   |   _addr       |  |   new PUSH_A -> read A -> L1 ring        |  |   |
+|   |   | - state (R)   |  |   new PUSH_B -> read B -> L1 ring        |  |   |
+|   |   | - sync_req    |  |   TERMINATE_A/B -> final drain -> exit   |  |   |
 |   |   | - sync_host_ts|  |                                           |  |   |
 |   |   +-------+-------+  +-------------------------------------------+  |   |
 |   |           |                        ^ NOC read (timestamp data)      |   |
 |   +-----------+------------------------+--------------------------------+   |
 |               |                        |                                    |
-|               | state (PUSH_A/B)       |                                    |
+|               | state (PUSH_A/B or TERMINATE_A/B)                           |
 |               | NOC write              |                                    |
 |               v                        |                                    |
 |   +---------------------------------------------------------------------+   |
@@ -136,12 +136,27 @@ Layout: `tt_metal/hw/inc/hostdev/realtime_profiler_msgs.h`. HAL: `tt::tt_metal::
 
 ---
 
-## 5. File / Component Reference
+## 5. Shutdown and DMA Ownership
+
+Closing a mesh drains its logical command queues before stopping its profiler. Physical dispatch stays alive: unit meshes created together share physical-device ownership, so closing one must not terminate a sibling mesh's dispatch.
+
+1. `RealtimeProfilerManager::shutdown()` queues a terminal `RT_PROFILER_FLUSH` on each device's CQ0. Dispatch sends one `TERMINATE_A` or `TERMINATE_B` message selecting the final timestamp buffer, then disables further profiler writes. Its local termination state also releases the companion dispatch TRISC, even when profiling was never enabled.
+2. Dispatch owns the profiler state mailbox after initialization. BRISC remembers the last state it consumed instead of clearing the mailbox to `IDLE`, which could overwrite a concurrent terminal message. On terminal state it drains an unobserved predecessor buffer, if any, then the final buffer. Only BRISC publishes ring termination, after completing these reads and enqueues.
+3. NCRISC samples termination before the ring indices. It exits only when it has observed termination and an empty ring, so a stale empty-index snapshot cannot skip the producer's final entry. D2H writes complete before kernel exit.
+4. The host waits for the profiler program's completion while the receiver still drains the D2H FIFO. It then joins the receiver, publishes remaining records, and joins consumers before releasing the socket and its DMA pin. An empty FIFO alone is not a device-completion acknowledgment.
+
+If a device stop fails, close reports failure and logs the error. The failed device's socket is retained until process exit rather than unpinning a buffer that device code might still access.
+
+`RealtimeProfilerSanity.CloseDrainsRegisteredCallback` exercises close without an explicit quiesce or grace sleep. `RealtimeProfilerSanity.ClosingUnitMeshPreservesSiblingProfiler` exercises a sibling enqueue after the first unit mesh closes. Both require hardware execution; compilation alone does not establish the shutdown contract.
+
+---
+
+## 6. File / Component Reference
 
 | Component | File(s) |
 |-----------|--------|
 | Dispatch_s (timestamp record + signal) | `tt_metal/impl/dispatch/kernels/cq_dispatch_subordinate.cpp`, `realtime_profiler.hpp` |
-| Real-time profiler kernel | `tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp` |
+| Real-time profiler producer and D2H pusher | `tt_metal/impl/dispatch/kernels/cq_realtime_profiler.cpp`, `cq_realtime_profiler_push.cpp` |
 | Host init, sync, receiver thread | `mesh_device.cpp`, `realtime_profiler_manager.cpp` |
 | Shared struct + HAL accessors | `realtime_profiler_msgs.h` → `realtime_profiler_msgs` (generated) |
 | Callbacks (Tracy, user) | `tt_metal/impl/dispatch/data_collector.cpp`, `realtime_profiler_tracy_handler.cpp` |

@@ -148,10 +148,13 @@ void kernel_main() {
         loop_count++;
         RT_PROF_NCRISC_DBG_SET(ring_buffer, loop_iteration, loop_count);
 
+        // Observe producer completion before taking the final index snapshot. Reading the
+        // indices first could see an empty ring just before BRISC publishes its last entry.
+        const bool producer_done = ring_buffer->terminate;
         const uint32_t read_index = ring_buffer->read_index;
         const uint32_t write_index = ring_buffer->write_index;
         if (write_index == read_index) {
-            if (ring_buffer->terminate) {
+            if (producer_done) {
                 return;
             }
             continue;

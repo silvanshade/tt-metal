@@ -67,7 +67,8 @@ __attribute__((noinline)) void realtime_profiler_sync() {
     volatile tt_reg_ptr uint32_t* p_reg = reinterpret_cast<volatile tt_reg_ptr uint32_t*>(RISCV_DEBUG_REG_WALL_CLOCK_L);
 
     uint32_t sync_count = 0;
-    while (rt_profiler_msg->sync_request) {
+    while (rt_profiler_msg->sync_request &&
+           rt_profiler_msg->realtime_profiler_state < REALTIME_PROFILER_STATE_TERMINATE) {
         invalidate_l1_cache();
 
         uint32_t host_time = rt_profiler_msg->sync_host_timestamp;
@@ -113,31 +114,39 @@ void kernel_main() {
     ring_buffer->terminate = 0;
 
     rt_profiler_msg->realtime_profiler_state = REALTIME_PROFILER_STATE_IDLE;
+    RealtimeProfilerState last_state = REALTIME_PROFILER_STATE_IDLE;
 
     while (true) {
         invalidate_l1_cache();
-
-        RealtimeProfilerState state = static_cast<RealtimeProfilerState>(rt_profiler_msg->realtime_profiler_state);
-
+        const auto state = static_cast<RealtimeProfilerState>(rt_profiler_msg->realtime_profiler_state);
+        if (state == last_state) {
+            if (rt_profiler_msg->sync_request) {
+                realtime_profiler_sync();
+            }
+            continue;
+        }
+        // Dispatch owns the mailbox after launch. Writing IDLE here could overwrite its
+        // terminal message while a timestamp read or a full-ring wait is in flight.
+        const auto previous_state = last_state;
+        last_state = state;
         switch (state) {
-            case REALTIME_PROFILER_STATE_IDLE:
-                if (rt_profiler_msg->sync_request) {
-                    DPRINT("REALTIME: sync_request detected!\n");
-                    realtime_profiler_sync();
+            case REALTIME_PROFILER_STATE_PUSH_A: realtime_profiler_read_and_enqueue(true); break;
+            case REALTIME_PROFILER_STATE_PUSH_B: realtime_profiler_read_and_enqueue(false); break;
+            case REALTIME_PROFILER_STATE_TERMINATE_A:
+            case REALTIME_PROFILER_STATE_TERMINATE_B:
+                // The terminal write can overtake BRISC observing the previous PUSH. Dispatch
+                // has stopped updating both buffers now, so drain that predecessor if necessary.
+                if (previous_state != (state == REALTIME_PROFILER_STATE_TERMINATE_A ? REALTIME_PROFILER_STATE_PUSH_B
+                                                                                    : REALTIME_PROFILER_STATE_PUSH_A)) {
+                    realtime_profiler_read_and_enqueue(state == REALTIME_PROFILER_STATE_TERMINATE_B);
                 }
-                continue;
-
-            case REALTIME_PROFILER_STATE_PUSH_A:
-                realtime_profiler_read_and_enqueue(true);
-                rt_profiler_msg->realtime_profiler_state = REALTIME_PROFILER_STATE_IDLE;
-                break;
-
-            case REALTIME_PROFILER_STATE_PUSH_B:
-                realtime_profiler_read_and_enqueue(false);
-                rt_profiler_msg->realtime_profiler_state = REALTIME_PROFILER_STATE_IDLE;
-                break;
-
-            case REALTIME_PROFILER_STATE_TERMINATE: ring_buffer->terminate = 1; return;
+                realtime_profiler_read_and_enqueue(state == REALTIME_PROFILER_STATE_TERMINATE_A);
+                [[fallthrough]];
+            case REALTIME_PROFILER_STATE_TERMINATE:
+                // Only the producer publishes completion, after its last entry and read barrier.
+                ring_buffer->terminate = 1;
+                return;
+            case REALTIME_PROFILER_STATE_IDLE: break;
         }
     }
 }

@@ -35,6 +35,7 @@
 #include <tt-metalium/mesh_buffer.hpp>
 #include <tt-metalium/mesh_coord.hpp>
 #include <tt-metalium/mesh_device.hpp>
+#include "distributed/mesh_workload_utils.hpp"
 #include <tt-metalium/mesh_device_view.hpp>
 #include <tt-metalium/tt_align.hpp>
 #include <tt_metal.hpp>
@@ -1172,87 +1173,33 @@ void RealtimeProfilerManager::on_callback_unregistered(tt::ProgramRealtimeProfil
 
 RealtimeProfilerManager::~RealtimeProfilerManager() { shutdown(); }
 
-void RealtimeProfilerManager::shutdown() {
-    // Upper bound on the wait for the push kernel to finish draining; see the poll below.
-    constexpr auto kShutdownKernelExitGrace = std::chrono::milliseconds(100);
-    constexpr auto kShutdownKernelExitPollBackoff = std::chrono::microseconds(50);
+bool RealtimeProfilerManager::shutdown() {
+    bool success = true;
     MetalContext::instance(context_id_).data_collector()->DetachRealtimeProfilerCallbackListener(this);
 
-    // Re-write ring_buffer->terminate as a safety net, then let the push kernel deliver the last PCIe page.
+    // Mesh CQs have finished, but the physical dispatch kernels may outlive this mesh.
+    // Stop only this profiler, through the same dispatch_s stream that publishes its records.
+    // Keep the receiver alive while the BRISC producer and NCRISC DMA consumer finish.
     for (auto& dev_state : devices_) {
-        if (dev_state.core_l1.ring_buffer != 0 && dev_state.device) {
-            const uint32_t terminate_addr = dev_state.core_l1.ring_buffer + offsetof(RtProfilerRingBuffer, terminate);
-            std::vector<uint32_t> terminate_flag = {1};
-            try {
-                write_sync_request(dev_state, SyncRequest::Clear);
-                tt::tt_metal::detail::WriteToDeviceL1(
-                    dev_state.device,
-                    dev_state.realtime_profiler_core,
-                    terminate_addr,
-                    terminate_flag,
-                    CoreType::WORKER);
-            } catch (const std::exception& e) {
-                log_warning(
-                    tt::LogMetal,
-                    "[Real-time profiler] Failed to write terminate flag for device {}: {}",
-                    dev_state.chip_id,
-                    e.what());
-            }
-        }
-    }
-    // Wait for the push kernel to hand over its last PCIe page and exit. It drains the ring and returns once
-    // it observes terminate with an empty ring, and it bumps read_index only after that page's write barrier
-    // has retired, so read_index == write_index means every entry has landed in the host ring. Poll for that
-    // equality rather than waiting out kShutdownKernelExitGrace: draining takes microseconds, and shutdown()
-    // runs on every close_device, where suites with a function-scoped `device` fixture pay it per test.
-    const auto deadline = std::chrono::steady_clock::now() + kShutdownKernelExitGrace;
-    for (auto& dev_state : devices_) {
-        if (dev_state.core_l1.ring_buffer == 0 || !dev_state.device) {
+        if (!dev_state.device || !dev_state.realtime_profiler_program) {
             continue;
         }
-        const uint32_t indices_addr = dev_state.core_l1.ring_buffer + offsetof(RtProfilerRingBuffer, write_index);
-        static_assert(
-            offsetof(RtProfilerRingBuffer, read_index) ==
-                offsetof(RtProfilerRingBuffer, write_index) + sizeof(uint32_t),
-            "write_index and read_index must be adjacent to be read in one shot");
-        bool drained = false;
-        while (true) {
-            std::vector<uint32_t> indices(2, 0);
-            try {
-                tt::tt_metal::detail::ReadFromDeviceL1(
-                    dev_state.device,
-                    dev_state.realtime_profiler_core,
-                    indices_addr,
-                    2 * sizeof(uint32_t),
-                    indices,
-                    CoreType::WORKER);
-            } catch (const std::exception& e) {
-                log_warning(
-                    tt::LogMetal,
-                    "[Real-time profiler] Failed to read ring indices while draining device {}: {}",
-                    dev_state.chip_id,
-                    e.what());
-                break;
-            }
-            if (indices[0] == indices[1]) {
-                drained = true;
-                break;
-            }
-            if (std::chrono::steady_clock::now() >= deadline) {
-                log_warning(
-                    tt::LogMetal,
-                    "[Real-time profiler] Device {} push kernel did not drain within {} ms "
-                    "(write_index={}, read_index={}); trailing records may be lost",
-                    dev_state.chip_id,
-                    std::chrono::duration_cast<std::chrono::milliseconds>(kShutdownKernelExitGrace).count(),
-                    indices[0],
-                    indices[1]);
-                break;
-            }
-            std::this_thread::sleep_for(kShutdownKernelExitPollBackoff);
-        }
-        if (drained) {
-            log_debug(tt::LogMetal, "[Real-time profiler] Device {} push kernel drained", dev_state.chip_id);
+        try {
+            write_rt_profiler_flush(
+                /*cq_id=*/0, SubDeviceId{0}, dev_state.device->sysmem_manager(), /*wait_count=*/0, /*terminate=*/true);
+            tt::tt_metal::detail::WaitProgramDone(
+                dev_state.device, *dev_state.realtime_profiler_program, /*read_device_profiler_results=*/false);
+            dev_state.shutdown_acknowledged = true;
+        } catch (const std::exception& e) {
+            success = false;
+            // An empty ring does not prove DMA has stopped. Do not unpin a potentially live
+            // destination on this error path; the failed device requires a reset.
+            log_error(
+                tt::LogMetal,
+                "[Real-time profiler] Device {} did not acknowledge shutdown: {}; retaining its DMA socket until "
+                "process exit, device reset required",
+                dev_state.chip_id,
+                e.what());
         }
     }
 
@@ -1305,10 +1252,15 @@ void RealtimeProfilerManager::shutdown() {
     tracy_handler_.reset();
     // Clear activation state before destroying per-device records so concurrent
     // tt::IsProgramRealtimeProfilerActive() queries don't observe a chip mid-shutdown.
-    for (const auto& dev_state : devices_) {
+    for (auto& dev_state : devices_) {
         tt::NotifyProgramRealtimeProfilerDeactivated(context_id_, dev_state.chip_id);
+        if (!dev_state.shutdown_acknowledged) {
+            // Intentionally retain the pin and allocation rather than permit DMA into freed memory.
+            (void)dev_state.socket.release();
+        }
     }
     devices_.clear();
+    return success;
 }
 
 void RealtimeProfilerManager::run_sync(DeviceState& dev_state, uint32_t num_samples) {
