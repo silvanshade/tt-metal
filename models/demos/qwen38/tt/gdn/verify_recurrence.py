@@ -75,8 +75,8 @@ def verify_recurrence(q, k, v, g, beta, state, snapshots):
         writer_args[core.x][core.y] = [head, rows, first, output.buffer_address(), snapshots.buffer_address()]
         compute_args[core.x][core.y] = [rows]
     n = columns
-    pages = {0: 8, 1: 8, 2: 2 * n, 3: 2, 4: 2, 5: 4 * n, 6: 4 * n, 7: 4 * n, 8: n, 9: n, 10: 4, 11: 4 * n, 12: 4 * n}
-    pages |= {14: 2 * n, 15: 1, 16: 8 * n, 18: 1}
+    pages = {0: 4, 1: 4, 2: n, 3: 2, 4: 2, 5: 4 * n, 6: 4 * n, 7: 4 * n, 8: n, 9: n, 10: 4, 14: 2 * n, 15: 1}
+    pages |= {16: 8 * n, 18: 1}
     head_tiles = (heads + 31) // 32
     reader_compile = [head_tiles, columns]
     for tensor in tensors:

@@ -19,7 +19,8 @@ void kernel_main() {
     Noc noc;
     const uint32_t offset = (((head % 32) / 16) * 512 + (head % 16) * 16) * 4;
     for (uint32_t row = 0; row < rows; ++row) {
-        // Output: row zero of each owned column tile lands in this head's row of the output tile.
+        // Output: row `row` of each owned column tile lands in this head's row of the output tile.
+        const uint32_t source_offset = ((row / 16) * 512 + (row % 16) * 16) * 4;
         const uint32_t page = (row * head_tiles + head / 32) * 4 + first;
         DataflowBuffer out(14);
         out.wait_front(columns);
@@ -30,7 +31,7 @@ void kernel_main() {
                     source,
                     output,
                     64,
-                    {.offset_bytes = t * 4096 + face * 1024},
+                    {.offset_bytes = t * 4096 + source_offset + face * 1024},
                     {.page_id = page + t, .offset_bytes = offset + face * 1024});
             }
         }
