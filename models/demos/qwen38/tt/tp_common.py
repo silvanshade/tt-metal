@@ -224,16 +224,19 @@ def matmul_1d_decode(x, weight, decode_1d_progcfg, compute_cfg, out_memory_confi
     return out
 
 
+def activation_core_grid(k, storage_cores=32):
+    """Core grid of the decode activation width-sharded over `k`: the core count dividing `k` in
+    tiles nearest `storage_cores`, as `create_dram_sharded_matmul_program_config` picks it."""
+    rows, cols = _find_grid(k // TILE_SIZE, storage_cores)
+    return ttnn.CoreGrid(x=cols, y=rows)
+
+
 def create_activation_shard_config(k, storage_cores=32):
-    """WIDTH_SHARDED L1 activation config for a [*, k] activation, on the grid
-    `create_dram_sharded_matmul_program_config` picks for the same `k` and `storage_cores`."""
-    k_tiles = k // TILE_SIZE
-    rows, cols = _find_grid(k_tiles, storage_cores)
-    num_cores = rows * cols
-    width_per_core = k // num_cores
+    """WIDTH_SHARDED L1 activation config for a [*, k] activation on `activation_core_grid`."""
+    grid = activation_core_grid(k, storage_cores)
     return ttnn.create_sharded_memory_config(
-        shape=(TILE_SIZE, width_per_core),
-        core_grid=ttnn.CoreGrid(x=cols, y=rows),
+        shape=(TILE_SIZE, k // grid.num_cores),
+        core_grid=grid,
         strategy=ttnn.ShardStrategy.WIDTH,
         orientation=ttnn.ShardOrientation.ROW_MAJOR,
         use_height_and_width_as_shard_shape=True,

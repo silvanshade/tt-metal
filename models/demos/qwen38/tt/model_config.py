@@ -36,18 +36,21 @@ def qkvzab_default_layout(qkvzab_dim_tp: int, workers: int) -> str:
     return "dram_sharded" if tpc.dram_sharded_readers(qkvzab_dim_tp, workers) > 1 else "1d"
 
 
-# Storage cores and in0_block_w cap of the decode DRAM-sharded activation, by per-device K, for the
-# row-parallel projections. Measured on one p150a with tests/test_decode_matmul_layout_sweep.py over
-# the TP=2 shapes (32 rows, two readers per bank): down [8704, 5120] runs 67.3 us on 8 cores at block
-# 17 against 82.8 us on the 16 cores `_find_grid` picks; the GDN and attention out-projections
-# [3072, 5120] run 25.3 us on 8 cores at block 6 against 29.9 us on 32 cores at block 3. Any other K
-# keeps 32 cores and the widest block. The column-parallel K=5120 input shares its grid with the
-# residual norm, so it is not listed.
-DECODE_ACT_GRID = {8704: (8, 17), 3072: (8, 6)}
+# Storage cores and in0_block_w cap of the decode DRAM-sharded activation, by (TP, per-device K).
+# Measured on one p150a with tests/test_decode_matmul_layout_sweep.py over the TP=2 shapes (32 rows):
+# down [8704, 5120] runs 67.3 us on 8 cores at block 17 against 82.8 us on the 16 cores `_find_grid`
+# picks; the GDN and attention out-projections [3072, 5120] run 25.3 us on 8 cores at block 6
+# against 29.9 us on 32 cores at block 3. Anything unlisted keeps 32 cores and the widest block.
+# The hidden-width (K=5120) grid is also the residual norm's output grid (`attn_input_grid`), so the
+# norm writes the in-projections' layout directly. 40 cores there run qkvzab at 51.9 us against 57.8
+# on 32 and hold the other in-projections within 3%, but the captured DFlash2 round gained only
+# 0.2 ms while mean tokens per round fell 3.59 -> 3.47 over nine prompt/corpus pairs at 1024 tokens
+# (norm and matmul error unchanged against fp32), so K=5120 stays on 32.
+DECODE_ACT_GRID = {(2, 8704): (8, 17), (2, 3072): (8, 6)}
 
 
-def decode_act_grid(k: int) -> tuple[int, int | None]:
-    return DECODE_ACT_GRID.get(k, (32, None))
+def decode_act_grid(tp: int, k: int) -> tuple[int, int | None]:
+    return DECODE_ACT_GRID.get((tp, k), (32, None))
 
 
 class Qwen38ModelArgs(ModelArgs):
@@ -254,41 +257,44 @@ class Qwen38ModelArgs(ModelArgs):
 
         # DRAM-sharded matmul progcfgs (decode, M=1)
         M = 1
+        _hid = decode_act_grid(tp, self.dim)
+        _out = decode_act_grid(tp, self.gdn_value_dim_tp)
+        _wo = decode_act_grid(tp, self.attn_out_dim_tp)
+        _ff = decode_act_grid(tp, self.hidden_dim // tp)
+        # The residual norm's decode output grid is the hidden-width activation grid (get_norm_config).
+        self.attn_input_grid = tpc.activation_core_grid(self.dim, _hid[0])
         self.gdn_qkvz_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.gdn_qkvz_dim_tp, num_workers_per_dram_bank=_w
+            M, self.dim, self.gdn_qkvz_dim_tp, *_hid, num_workers_per_dram_bank=_w
         )
         self.gdn_qkvzab_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.gdn_qkvzab_dim_tp, num_workers_per_dram_bank=_w
+            M, self.dim, self.gdn_qkvzab_dim_tp, *_hid, num_workers_per_dram_bank=_w
         )
-        _out_cores, _out_block = decode_act_grid(self.gdn_value_dim_tp)
         self.gdn_out_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.gdn_value_dim_tp, self.dim, _out_cores, _out_block, num_workers_per_dram_bank=_w
+            M, self.gdn_value_dim_tp, self.dim, *_out, num_workers_per_dram_bank=_w
         )
         self.attn_qg_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.n_local_heads * self.head_dim * 2, num_workers_per_dram_bank=_w
+            M, self.dim, self.n_local_heads * self.head_dim * 2, *_hid, num_workers_per_dram_bank=_w
         )
         self.attn_k_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, kv_dim_per_device, num_workers_per_dram_bank=_w
+            M, self.dim, kv_dim_per_device, *_hid, num_workers_per_dram_bank=_w
         )
         self.attn_v_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, kv_dim_per_device, num_workers_per_dram_bank=_w
+            M, self.dim, kv_dim_per_device, *_hid, num_workers_per_dram_bank=_w
         )
         self.attn_qkv_fused_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.attn_qkv_fused_dim_tp, num_workers_per_dram_bank=_w
+            M, self.dim, self.attn_qkv_fused_dim_tp, *_hid, num_workers_per_dram_bank=_w
         )
-        _wo_cores, _wo_block = decode_act_grid(self.attn_out_dim_tp)
         self.attn_wo_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.attn_out_dim_tp, self.dim, _wo_cores, _wo_block, num_workers_per_dram_bank=_w
+            M, self.attn_out_dim_tp, self.dim, *_wo, num_workers_per_dram_bank=_w
         )
         self.mlp_w1_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.hidden_dim // tp, num_workers_per_dram_bank=_w
+            M, self.dim, self.hidden_dim // tp, *_hid, num_workers_per_dram_bank=_w
         )
         self.mlp_w3_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.dim, self.hidden_dim // tp, num_workers_per_dram_bank=_w
+            M, self.dim, self.hidden_dim // tp, *_hid, num_workers_per_dram_bank=_w
         )
-        _ff_cores, _ff_block = decode_act_grid(self.hidden_dim // tp)
         self.mlp_w2_progcfg = tpc.create_dram_sharded_matmul_program_config(
-            M, self.hidden_dim // tp, self.dim, _ff_cores, _ff_block, num_workers_per_dram_bank=_w
+            M, self.hidden_dim // tp, self.dim, *_ff, num_workers_per_dram_bank=_w
         )
 
         # 1D decode matmuls (QWEN38_DECODE_MATMUL=1d): small grids on interleaved weights. This arm
@@ -363,11 +369,11 @@ class Qwen38ModelArgs(ModelArgs):
         )
 
         # Activation shard configs
-        self.act_shard_hidden = tpc.create_activation_shard_config(self.dim)
-        self.act_shard_gdn_value = tpc.create_activation_shard_config(self.gdn_value_dim_tp, _out_cores)
-        self.act_shard_attn_out = tpc.create_activation_shard_config(self.attn_out_dim_tp, _wo_cores)
+        self.act_shard_hidden = tpc.create_activation_shard_config(self.dim, _hid[0])
+        self.act_shard_gdn_value = tpc.create_activation_shard_config(self.gdn_value_dim_tp, _out[0])
+        self.act_shard_attn_out = tpc.create_activation_shard_config(self.attn_out_dim_tp, _wo[0])
         # Down-projection input in the dram_sharded arm; same grid as mlp_w2_progcfg.
-        self.act_shard_ff = tpc.create_activation_shard_config(self.hidden_dim // tp, _ff_cores)
+        self.act_shard_ff = tpc.create_activation_shard_config(self.hidden_dim // tp, _ff[0])
 
         # KV-cache height shard for paged_update_cache (one user per core).
         _B = max(1, self.max_batch_size)
