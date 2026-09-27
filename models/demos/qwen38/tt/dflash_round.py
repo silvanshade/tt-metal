@@ -130,7 +130,7 @@ class Qwen38DFlashRound:
         frame, drafter, block = self.frame, self.drafter, self.drafter.block
         following = ttnn.add(frame["start"], accepted)
         block_ids = self._indices(ttnn.concat([correction, self.mask_ids], dim=2), (block, 1))
-        drafted = drafter.draft(block_ids, drafter.device_positions(following), drafter.device_mask(following))
+        drafted = drafter.draft(block_ids, drafter.device_positions(following, drafter.width), drafter.device_mask(following))
         values, indices, projected = drafter.candidates(drafted)
         header = ttnn.add(ttnn.multiply(self.header[0], accepted), ttnn.multiply(self.header[1], correction))
         egress = ttnn.concat([header, values, indices, projected], dim=3)

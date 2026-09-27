@@ -70,7 +70,8 @@ class Engine:
         heads = text.num_key_value_heads // self.mesh.get_num_devices()
         model.allocate_kv_caches((blocks, heads, PAGE, text.head_dim), ttnn.bfloat4_b, batch_size=1)
         self.page_table = torch.arange(blocks, dtype=torch.int32).reshape(1, blocks)
-        self.drafter = Qwen38DFlash(model, drafter_dir, max_context)
+        block = os.environ.get("QWEN38_DFLASH_BLOCK")
+        self.drafter = Qwen38DFlash(model, drafter_dir, max_context, block=int(block) if block else None)
         self.verifier = Qwen38MTPVerifier(model, self.drafter.block, taps=self.drafter.taps)
         self.round = Qwen38DFlashRound(model, self.verifier, self.drafter, blocks)
         self.block = self.drafter.block

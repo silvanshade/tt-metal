@@ -40,16 +40,35 @@ def _split(logits, mesh) -> tuple[int, int, int, int]:
     return tiles, per, cores, 2 * cores
 
 
+def _chunked(logits, run):
+    """Apply an at-most-8-row kernel `run` to each 8-row slice of logits [1, 1, T, V]; concat
+    each of its results along rows. The kernels keep a row's partials in half a face row."""
+    rows, width = logits.shape[-2], logits.shape[-1]
+    parts = []
+    for first in range(0, rows, 8):
+        piece = ttnn.slice(logits, (0, 0, first, 0), (1, 1, min(first + 8, rows), width))
+        parts.append(run(piece))
+        ttnn.deallocate(piece)
+    results = []
+    for outputs in zip(*parts, strict=True):
+        results.append(ttnn.concat(list(outputs), dim=2, memory_config=ttnn.L1_MEMORY_CONFIG))
+        for output in outputs:
+            ttnn.deallocate(output)
+    return results
+
 def greedy_tokens(logits, mesh, tt_ccl, topology) -> ttnn.Tensor:
     """Per row, the vocabulary index of the maximum logit across every device's shard.
 
     requires: BF16 tiled interleaved logits [1, 1, T, V / devices] on each device, device d
-        holding vocabulary columns [d * V / devices, (d + 1) * V / devices); 1 <= T <= 8.
+        holding vocabulary columns [d * V / devices, (d + 1) * V / devices); 1 <= T <= 32 (rows
+        past 8 run in 8-row slices).
     ensures: returns FP32 tiled [1, 1, T, 1] in L1, replicated, whose row t is the first index of
         the maximum of row t over the whole vocabulary, as argmax over the gathered logits (-0 and
         +0 tie); nothing else is allocated past the call.
     """
     rows, width = logits.shape[-2], logits.shape[-1]
+    if rows > 8:
+        return _chunked(logits, lambda piece: (greedy_tokens(piece, mesh, tt_ccl, topology),))[0]
     assert 1 <= rows <= 8 and width % 32 == 0
     assert logits.dtype == ttnn.bfloat16 and logits.layout == ttnn.TILE_LAYOUT and not logits.is_sharded()
     devices = mesh.get_num_devices()
@@ -110,13 +129,16 @@ def greedy_tokens(logits, mesh, tt_ccl, topology) -> ttnn.Tensor:
 def shard_candidates(logits, count: int, width: int = 32) -> tuple[ttnn.Tensor, ttnn.Tensor]:
     """Per row, the `count` largest logits of each device's vocabulary shard and their columns.
 
-    requires: BF16 tiled interleaved logits [1, 1, T, V / devices] per device; 1 <= T <= 8;
+    requires: BF16 tiled interleaved logits [1, 1, T, V / devices] per device; 1 <= T <= 32 (rows
+        past 8 run in 8-row slices);
         1 <= count <= width == 32.
     ensures: returns FP32 tiled [1, 1, T, width] values and shard-local columns per device (not
         gathered): row t holds the `count` largest values of row t, ties to the lower column, in
         no particular order, then -inf values with column 0.
     """
     rows = logits.shape[-2]
+    if rows > 8:
+        return tuple(_chunked(logits, lambda piece: shard_candidates(piece, count, width)))
     assert 1 <= rows <= 8 and 1 <= count <= width == 32 and logits.shape[-1] % 32 == 0
     assert logits.dtype == ttnn.bfloat16 and logits.layout == ttnn.TILE_LAYOUT and not logits.is_sharded()
     mesh = logits.device()

@@ -106,10 +106,13 @@ class Qwen38DFlash:
         max_positions: int,
         weight_dtype: ttnn.DataType = ttnn.bfloat8_b,
         matmul_fidelity: ttnn.MathFidelity = ttnn.MathFidelity.HiFi2,
+        block: int | None = None,
     ) -> None:
+        """block: drafted rows per round (anchor included); default the checkpoint's block size.
+        A wider block than the checkpoint's drafts the extra positions with the same model."""
         config = json.loads((checkpoint / "config.json").read_text())
         draft = config["dflash_config"]
-        self.block = int(draft["block_size"])
+        self.block = int(draft["block_size"]) if block is None else block
         self.mask_token = int(draft["mask_token_id"])
         self.top_k = int(draft["selector_top_k"])
         self.taps = tuple(int(i) for i in draft["target_layer_ids"])
@@ -120,7 +123,7 @@ class Qwen38DFlash:
         group, kernel = int(draft["conv_group_size"]), int(draft["conv_kernel_size"])
         types = set(config["layer_types"])
         if (
-            self.block != 8
+            not 2 <= self.block <= 32
             or kernel != 2
             or types != {"sliding_attention"}
             or config.get("is_causal", True)
@@ -128,6 +131,16 @@ class Qwen38DFlash:
             or config["rope_parameters"].get("rope_type", "default") != "default"
         ):
             raise ValueError("unsupported DFlash2 configuration")
+        # The drafter runs `width` rows, the least power of two holding the block. Attention folds
+        # each group of up to eight drafted rows into query heads (head h, row t -> query
+        # h * group + t), one SDPA batch per group over the shared ring, so a core's query tile
+        # stays the block-8 shape at any width. Padding rows follow the block; their keys are
+        # masked from every row, so they leave the block's rows exact, and their outputs are dropped.
+        self.width = next(rows for rows in (2, 4, 8, 16, 32) if rows >= self.block)
+        self.group = min(self.width, 8)
+        self.batches = self.width // self.group
+        # Drafted row of each group's mask-tile row: group g, tile row r -> g * group + r % group.
+        self.mask_rows = torch.arange(self.batches)[:, None] * self.group + torch.arange(32)[None, :] % self.group
         mesh = target.mesh_device
         self.tp = mesh.get_num_devices()
         if self.heads % self.tp or self.kv_heads % self.tp or self.hidden % (self.tp * 32):
@@ -228,9 +241,9 @@ class Qwen38DFlash:
         expand = torch.zeros(self.groups, self.hidden)
         expand[torch.arange(self.hidden) // group, torch.arange(self.hidden)] = 1.0
         self.expand = dram(expand.reshape(1, 1, self.groups, self.hidden), ttnn.bfloat8_b)
-        shift = torch.zeros(self.block, self.block)
-        shift[torch.arange(1, self.block), torch.arange(self.block - 1)] = 1.0
-        self.shift = dram(shift.reshape(1, 1, self.block, self.block), ttnn.bfloat16)
+        shift = torch.zeros(self.width, self.width)
+        shift[torch.arange(1, self.width), torch.arange(self.width - 1)] = 1.0
+        self.shift = dram(shift.reshape(1, 1, self.width, self.width), ttnn.bfloat16)
         half = self.head_dim // 2
         rotate = torch.zeros(self.head_dim, self.head_dim)
         rotate[torch.arange(half) + half, torch.arange(half)] = -1.0
@@ -245,7 +258,7 @@ class Qwen38DFlash:
             for table in (angles.cos(), angles.sin())
         )
         # Block slot columns: the block's own rows are visible to every block row, padding is not.
-        tail = torch.full((1, 1, 32, self.ring_length - self.ring_rows), float("-inf"))
+        tail = torch.full((self.batches, 1, 32, self.ring_length - self.ring_rows), float("-inf"))
         tail[..., : self.block] = 0.0
         self.block_tail = dram(tail, ttnn.float32)
         self.block_slot = dram(torch.full((1, 1, 1, 1), float(self.ring_rows)), ttnn.float32)
@@ -258,9 +271,19 @@ class Qwen38DFlash:
         )
         # Device-resident round inputs derive from one FP32 start scalar and the origin scalar.
         self.slot_index = dram(torch.arange(self.ring_rows, dtype=torch.float32).reshape(1, 1, 1, -1), ttnn.float32)
-        reach = self.window - 1 - (torch.arange(32) % self.block)
-        self.reach = dram(reach.float().reshape(1, 1, 32, 1), ttnn.float32)
+        reach = self.window - 1 - self.mask_rows
+        self.reach = tuple(dram(row.float().reshape(1, 1, 32, 1), ttnn.float32) for row in reach)
         self.offsets = dram(torch.arange(self.block, dtype=torch.float32).reshape(1, 1, -1, 1), ttnn.float32)
+        self.draft_offsets = dram(torch.arange(self.width, dtype=torch.float32).reshape(1, 1, -1, 1), ttnn.float32)
+        self.padding = (
+            dram(
+                torch.full((self.width - self.block, 1), self.mask_token, dtype=torch.int32),
+                ttnn.uint32,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+            )
+            if self.width > self.block
+            else None
+        )
         self.origin_scalar = dram(torch.zeros(1, 1, 1, 1), ttnn.float32)
         self.layers = []
         for i in range(self.layer_count):
@@ -314,6 +337,20 @@ class Qwen38DFlash:
 
     def _matmul(self, a: ttnn.Tensor, b: ttnn.Tensor, **kwargs) -> ttnn.Tensor:
         return ttnn.matmul(a, b, compute_kernel_config=self.compute, **kwargs)
+
+    def _attend(self, queries: ttnn.Tensor, ring_k: ttnn.Tensor, ring_v: ttnn.Tensor, mask: ttnn.Tensor, scale: float):
+        """Queries [1,1,heads*rows,D] over one layer's ring under an additive mask [1,1,heads*rows,L]."""
+        return ttnn.transformer.scaled_dot_product_attention_decode(
+            queries,
+            ring_k,
+            ring_v,
+            is_causal=False,
+            attn_mask=mask,
+            scale=scale,
+            program_config=self.attention_program,
+            compute_kernel_config=self.precise,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
 
     def _norm(self, fractured: ttnn.Tensor, weight: ttnn.Tensor) -> ttnn.Tensor:
         """Gather the fractured residual and apply checkpoint RMSNorm (gamma = weight)."""
@@ -489,13 +526,14 @@ class Qwen38DFlash:
         return (position - self.origin) % self.ring_rows
 
     def ring_mask(self, start: int) -> torch.Tensor:
-        """Additive mask [1,1,32,R] for a block at `start`: row r is block position r % 8."""
+        """Additive mask [groups,1,32,R] for a block at `start`: group g's row r is drafted row
+        g * group + r % group."""
         slots = torch.arange(self.ring_rows)
         m = torch.remainder(start - 1 - self.origin - slots, self.ring_rows)
-        offsets = (torch.arange(32) % self.block)[:, None]
-        visible = (m[None, :] < self.window - 1 - offsets) & (m[None, :] <= start - 1)
+        offsets = self.mask_rows[:, :, None]
+        visible = (m[None, None, :] < self.window - 1 - offsets) & (m[None, None, :] <= start - 1)
         mask = torch.where(visible, 0.0, float("-inf"))
-        return mask.reshape(1, 1, 32, self.ring_rows)
+        return mask.reshape(self.batches, 1, 32, self.ring_rows)
 
     # ------------------------------------------------- device-resident inputs (traceable)
 
@@ -504,43 +542,61 @@ class Qwen38DFlash:
         wraps = ttnn.floor(ttnn.multiply(ttnn.add(value, 0.5), 1.0 / self.ring_rows))
         return ttnn.subtract(value, ttnn.multiply(wraps, float(self.ring_rows)))
 
-    def device_positions(self, start: ttnn.Tensor) -> ttnn.Tensor:
-        """FP32 scalar start -> uint32 row-major positions [block, 1]."""
-        absolute = ttnn.add(self.offsets, start)
-        return ttnn.reshape(ttnn.to_layout(ttnn.typecast(absolute, ttnn.uint32), ttnn.ROW_MAJOR_LAYOUT), (self.block, 1))
+    def device_positions(self, start: ttnn.Tensor, rows: int | None = None) -> ttnn.Tensor:
+        """FP32 scalar start -> uint32 row-major positions [rows, 1]: `block` rows by default,
+        `width` rows for draft()."""
+        rows = self.block if rows is None else rows
+        offsets = {self.block: self.offsets, self.width: self.draft_offsets}[rows]
+        absolute = ttnn.add(offsets, start)
+        return ttnn.reshape(ttnn.to_layout(ttnn.typecast(absolute, ttnn.uint32), ttnn.ROW_MAJOR_LAYOUT), (rows, 1))
 
     def device_base(self, start: ttnn.Tensor) -> ttnn.Tensor:
         """FP32 scalar start -> FP32 scalar ring row of position start."""
         return self._modulo_ring(ttnn.subtract(start, self.origin_scalar))
 
     def device_mask(self, start: ttnn.Tensor) -> ttnn.Tensor:
-        """FP32 scalar start -> additive ring mask [1,1,32,R]: ring_mask() computed on device."""
+        """FP32 scalar start -> additive ring mask [groups,1,32,R]: ring_mask() computed on device."""
         last = ttnn.subtract(start, 1.0)
         distance = self._modulo_ring(ttnn.subtract(ttnn.subtract(last, self.origin_scalar), self.slot_index))
-        visible = ttnn.logical_and(ttnn.lt(distance, self.reach), ttnn.le(distance, last))
-        return ttnn.multiply(ttnn.subtract(visible, 1.0), 1e30)
+        masks = [
+            ttnn.multiply(ttnn.subtract(ttnn.logical_and(ttnn.lt(distance, reach), ttnn.le(distance, last)), 1.0), 1e30)
+            for reach in self.reach
+        ]
+        return masks[0] if self.batches == 1 else ttnn.concat(masks, dim=0)
 
     # ---------------------------------------------------------------- block
 
     def draft(self, token_ids: ttnn.Tensor, positions: ttnn.Tensor, ring_mask: ttnn.Tensor) -> ttnn.Tensor:
-        """Block hidden states [1,1,8,hidden], replicated and final-normalized.
+        """Block hidden states [1,1,block,hidden], replicated and final-normalized.
 
-        token_ids: uint32 row-major [8,1] (anchor then mask tokens); positions: uint32 [8,1];
-        ring_mask: FP32 [1,1,32,R] from ring_mask().
+        token_ids: uint32 row-major [block,1] (anchor then mask tokens); positions: uint32
+        [width,1]; ring_mask: FP32 [groups,1,32,R] from ring_mask().
 
-        Attention is one SDPA-decode call per layer: the block's K/V go to each ring's block
-        slot, and query head h * 8 + t (row t) attends over ring and slot under row t's mask.
+        Attention is one SDPA-decode call per layer: the drafted rows' K/V go to each ring's block
+        slot, and in batch g query head h * group + t (row g * group + t) attends over ring and
+        slot under that row's mask.
         """
-        rows = self.block
+        rows, group, groups = self.width, self.group, self.batches
+        if self.padding is not None:
+            token_ids = ttnn.concat([token_ids, self.padding], dim=0)
         h = self.target.embd(token_ids)
+        if self.padding is not None:
+            ttnn.deallocate(token_ids)
         h = ttnn.reshape(h, (1, 1, h.shape[0] * h.shape[1], h.shape[-1]))
         cos, sin = self._rotations(positions)
         scale = self.head_dim**-0.5
         block_mask = ttnn.typecast(ttnn.concat([ring_mask, self.block_tail], dim=-1), ttnn.bfloat16)
         mask = ttnn.concat(
-            [block_mask] * (self.local_heads * rows // 32), dim=2, memory_config=ttnn.DRAM_MEMORY_CONFIG
+            [block_mask] * (self.local_heads * group // 32), dim=2, memory_config=ttnn.DRAM_MEMORY_CONFIG
         )
         ttnn.deallocate(block_mask)
+        masks = (
+            [mask]
+            if groups == 1
+            else [ttnn.slice(mask, (g, 0, 0, 0), (g + 1, mask.shape[1], mask.shape[2], mask.shape[3])) for g in range(groups)]
+        )
+        if groups > 1:
+            ttnn.deallocate(mask)
         for layer in self.layers:
             x = self._norm(h, layer["input_norm"])
             conv = layer["attention_conv"]
@@ -559,18 +615,28 @@ class Qwen38DFlash:
                 ttnn.deallocate(staged)
                 ttnn.deallocate(source)
             ring_k, ring_v = layer["ring"]
-            queries = ttnn.reshape(q, (1, 1, self.local_heads * rows, self.head_dim))
-            attended = ttnn.transformer.scaled_dot_product_attention_decode(
-                queries,
-                ring_k,
-                ring_v,
-                is_causal=False,
-                attn_mask=mask,
-                scale=scale,
-                program_config=self.attention_program,
-                compute_kernel_config=self.precise,
-                memory_config=ttnn.L1_MEMORY_CONFIG,
-            )
+            if groups == 1:
+                attended = self._attend(
+                    ttnn.reshape(q, (1, 1, self.local_heads * rows, self.head_dim)), ring_k, ring_v, mask, scale
+                )
+            else:
+                # One call per group: SDPA decode's output spec takes its batch from K, so a
+                # shared-cache batch would be written past a one-batch output.
+                width = self.local_heads * group
+                grouped = ttnn.permute(ttnn.reshape(q, (self.local_heads, groups, group, self.head_dim)), (1, 0, 2, 3))
+                grouped = ttnn.reshape(grouped, (groups, 1, width, self.head_dim))
+                parts = []
+                for g, group_mask in enumerate(masks):
+                    queries = ttnn.slice(grouped, (g, 0, 0, 0), (g + 1, 1, width, self.head_dim))
+                    parts.append(self._attend(queries, ring_k, ring_v, group_mask, scale))
+                    ttnn.deallocate(queries)
+                ttnn.deallocate(grouped)
+                attended = ttnn.concat(parts, dim=0)
+                for part in parts:
+                    ttnn.deallocate(part)
+                attended = ttnn.permute(
+                    ttnn.reshape(attended, (groups, self.local_heads, group, self.head_dim)), (1, 0, 2, 3)
+                )
             ttnn.deallocate(q)
             attended = ttnn.reshape(attended, (1, self.local_heads, rows, self.head_dim))
             attended = ttnn.reshape(
@@ -601,11 +667,16 @@ class Qwen38DFlash:
             h = ttnn.add(h, out)
             ttnn.deallocate(out)
         ttnn.deallocate(cos)
-        ttnn.deallocate(mask)
+        for group_mask in masks:
+            ttnn.deallocate(group_mask)
         ttnn.deallocate(sin)
         out = self._norm(h, self.norm)
         ttnn.deallocate(h)
-        return out
+        if self.padding is None:
+            return out
+        block = ttnn.slice(out, (0, 0, 0, 0), (1, 1, self.block, out.shape[-1]))
+        ttnn.deallocate(out)
+        return block
 
     def candidates(self, hidden: ttnn.Tensor) -> tuple[ttnn.Tensor, ttnn.Tensor, ttnn.Tensor]:
         """Per block row: per device, the top_k logits of its vocabulary shard and their
@@ -650,7 +721,7 @@ class Qwen38DFlash:
             device=self.mesh,
             mesh_mapper=rep,
         )
-        positions = self.positions(start, self.block)
+        positions = self.positions(start, self.width)
         mask = ttnn.from_torch(
             self.ring_mask(start), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=self.mesh, mesh_mapper=rep
         )
