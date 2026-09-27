@@ -1,0 +1,5716 @@
+[
+  {
+    "qualified_name": "tt::tt_metal::SetRootDir",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 65,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void SetRootDir(const std::string& root_dir);",
+    "params": [
+      {
+        "name": "root_dir",
+        "type": "const std::string&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::SetRootDir",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/runtime.cc:38"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::detail::ReleaseOwnership",
+    "header": "tt_metal/api/tt-metalium/tt_metal.hpp",
+    "line": 73,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void ReleaseOwnership();",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::detail::ReleaseOwnership",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/runtime.cc:103",
+      "src/tt_metal_cxx/runtime.cc:118"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::GetNumAvailableDevices",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 72,
+    "kind": "free",
+    "receiver": null,
+    "signature": "size_t GetNumAvailableDevices();",
+    "params": [],
+    "return": {
+      "type": "size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::GetNumAvailableDevices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/device.cc:93",
+      "src/tt_metal_cxx/device.cc:109"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::GetNumPCIeDevices",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 86,
+    "kind": "free",
+    "receiver": null,
+    "signature": "size_t GetNumPCIeDevices();",
+    "params": [],
+    "return": {
+      "type": "size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::GetNumPCIeDevices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/device.cc:116"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateDevice",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 102,
+    "kind": "free",
+    "receiver": null,
+    "signature": "IDevice* CreateDevice(ChipId device_id, uint8_t num_hw_cqs = 1, size_t l1_small_size = DEFAULT_L1_SMALL_SIZE, size_t trace_region_size = DEFAULT_TRACE_REGION_SIZE, const DispatchCoreConfig& dispatch_core_config = DispatchCoreConfig{}, const std::vector<uint32_t>& l1_bank_remap = {}, size_t worker_l1_size = DEFAULT_WORKER_L1_SIZE);",
+    "params": [
+      {
+        "name": "device_id",
+        "type": "ChipId",
+        "category": "value"
+      },
+      {
+        "name": "num_hw_cqs",
+        "type": "uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "l1_small_size",
+        "type": "size_t",
+        "category": "value"
+      },
+      {
+        "name": "trace_region_size",
+        "type": "size_t",
+        "category": "value"
+      },
+      {
+        "name": "dispatch_core_config",
+        "type": "const DispatchCoreConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "l1_bank_remap",
+        "type": "const std::vector<uint32_t>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "worker_l1_size",
+        "type": "size_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "IDevice*",
+      "category": "ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateDevice",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/device.cc:98"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CloseDevice",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 138,
+    "kind": "free",
+    "receiver": null,
+    "signature": "bool CloseDevice(IDevice* device);",
+    "params": [
+      {
+        "name": "device",
+        "type": "IDevice*",
+        "category": "ptr"
+      }
+    ],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CloseDevice",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/device.cc:32"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateProgram",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 151,
+    "kind": "free",
+    "receiver": null,
+    "signature": "Program CreateProgram();",
+    "params": [],
+    "return": {
+      "type": "Program",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateProgram",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:251"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateKernel",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 167,
+    "kind": "free",
+    "receiver": null,
+    "signature": "KernelHandle CreateKernel(Program& program, const std::string& file_name, const std::variant<CoreCoord, CoreRange, CoreRangeSet>& core_spec, const std::variant<DataMovementConfig, ComputeConfig>& config);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "file_name",
+        "type": "const std::string&",
+        "category": "const_lref"
+      },
+      {
+        "name": "core_spec",
+        "type": "const std::variant<CoreCoord, CoreRange, CoreRangeSet>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "config",
+        "type": "const std::variant<DataMovementConfig, ComputeConfig>&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "KernelHandle",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateKernel",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:97",
+      "src/tt_metal_cxx/program.cc:189"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateKernelFromString",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 187,
+    "kind": "free",
+    "receiver": null,
+    "signature": "KernelHandle CreateKernelFromString(Program& program, const std::string& kernel_src_code, const std::variant<CoreCoord, CoreRange, CoreRangeSet>& core_spec, const std::variant<DataMovementConfig, ComputeConfig>& config);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "kernel_src_code",
+        "type": "const std::string&",
+        "category": "const_lref"
+      },
+      {
+        "name": "core_spec",
+        "type": "const std::variant<CoreCoord, CoreRange, CoreRangeSet>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "config",
+        "type": "const std::variant<DataMovementConfig, ComputeConfig>&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "KernelHandle",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateKernelFromString",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:114",
+      "src/tt_metal_cxx/program.cc:133",
+      "src/tt_metal_cxx/program.cc:151",
+      "src/tt_metal_cxx/program.cc:206",
+      "src/tt_metal_cxx/program.cc:225"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Program::get_runtime_id",
+    "header": "tt_metal/api/tt-metalium/program.hpp",
+    "line": 49,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "ProgramId get_runtime_id() const;",
+    "params": [],
+    "return": {
+      "type": "ProgramId",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Program::get_runtime_id",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:70"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Program::set_runtime_id",
+    "header": "tt_metal/api/tt-metalium/program.hpp",
+    "line": 48,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_runtime_id(ProgramId id);",
+    "params": [
+      {
+        "name": "id",
+        "type": "ProgramId",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Program::set_runtime_id",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:74"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ComputeConfig::ComputeConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 0,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "(implicit default constructor; not explicitly declared)",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::ComputeConfig::ComputeConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:14"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DataMovementConfig::DataMovementConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 0,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "(implicit default constructor; not explicitly declared)",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::DataMovementConfig::DataMovementConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:80"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DataMovementConfig::DataMovementConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 0,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "(implicit move constructor; not explicitly declared)",
+    "params": [
+      {
+        "name": "other",
+        "type": "DataMovementConfig&&",
+        "category": "rref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::DataMovementConfig::DataMovementConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:83"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ReaderDataMovementConfig::ReaderDataMovementConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 88,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "ReaderDataMovementConfig(std::vector<uint32_t> compile_args = {}, std::map<std::string, std::string> defines = {}, std::unordered_map<std::string, uint32_t> named_compile_args = {}, KernelBuildOptLevel opt_level = KernelBuildOptLevel::O2, std::vector<std::filesystem::path> compiler_include_paths = {});",
+    "params": [
+      {
+        "name": "compile_args",
+        "type": "std::vector<uint32_t>",
+        "category": "value"
+      },
+      {
+        "name": "defines",
+        "type": "std::map<std::string, std::string>",
+        "category": "value"
+      },
+      {
+        "name": "named_compile_args",
+        "type": "std::unordered_map<std::string, uint32_t>",
+        "category": "value"
+      },
+      {
+        "name": "opt_level",
+        "type": "KernelBuildOptLevel",
+        "category": "value"
+      },
+      {
+        "name": "compiler_include_paths",
+        "type": "std::vector<std::filesystem::path>",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::ReaderDataMovementConfig::ReaderDataMovementConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:153"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::WriterDataMovementConfig::WriterDataMovementConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 97,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "WriterDataMovementConfig(std::vector<uint32_t> compile_args = {}, std::map<std::string, std::string> defines = {}, std::unordered_map<std::string, uint32_t> named_compile_args = {}, KernelBuildOptLevel opt_level = KernelBuildOptLevel::O2, std::vector<std::filesystem::path> compiler_include_paths = {});",
+    "params": [
+      {
+        "name": "compile_args",
+        "type": "std::vector<uint32_t>",
+        "category": "value"
+      },
+      {
+        "name": "defines",
+        "type": "std::map<std::string, std::string>",
+        "category": "value"
+      },
+      {
+        "name": "named_compile_args",
+        "type": "std::unordered_map<std::string, uint32_t>",
+        "category": "value"
+      },
+      {
+        "name": "opt_level",
+        "type": "KernelBuildOptLevel",
+        "category": "value"
+      },
+      {
+        "name": "compiler_include_paths",
+        "type": "std::vector<std::filesystem::path>",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::WriterDataMovementConfig::WriterDataMovementConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:157"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::SetRuntimeArgs",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 476,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void SetRuntimeArgs(const Program& program, KernelHandle kernel, const std::variant<CoreCoord, CoreRange, CoreRangeSet>& core_spec, ttsl::Span<const uint32_t> runtime_args);",
+    "params": [
+      {
+        "name": "program",
+        "type": "const Program&",
+        "category": "const_lref"
+      },
+      {
+        "name": "kernel",
+        "type": "KernelHandle",
+        "category": "value"
+      },
+      {
+        "name": "core_spec",
+        "type": "const std::variant<CoreCoord, CoreRange, CoreRangeSet>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "runtime_args",
+        "type": "ttsl::Span<const uint32_t>",
+        "category": "span"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::SetRuntimeArgs",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/runtime_args.cc:41"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::GetRuntimeArgs",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 573,
+    "kind": "free",
+    "receiver": null,
+    "signature": "RuntimeArgsData& GetRuntimeArgs(const Program& program, KernelHandle kernel_id, const CoreCoord& logical_core);",
+    "params": [
+      {
+        "name": "program",
+        "type": "const Program&",
+        "category": "const_lref"
+      },
+      {
+        "name": "kernel_id",
+        "type": "KernelHandle",
+        "category": "value"
+      },
+      {
+        "name": "logical_core",
+        "type": "const CoreCoord&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "RuntimeArgsData&",
+      "category": "lref"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::GetRuntimeArgs",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/runtime_args.cc:48"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::SetCommonRuntimeArgs",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 541,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void SetCommonRuntimeArgs(const Program& program, KernelHandle kernel_id, ttsl::Span<const uint32_t> runtime_args);",
+    "params": [
+      {
+        "name": "program",
+        "type": "const Program&",
+        "category": "const_lref"
+      },
+      {
+        "name": "kernel_id",
+        "type": "KernelHandle",
+        "category": "value"
+      },
+      {
+        "name": "runtime_args",
+        "type": "ttsl::Span<const uint32_t>",
+        "category": "span"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::SetCommonRuntimeArgs",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/runtime_args.cc:55"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::GetCommonRuntimeArgs",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 601,
+    "kind": "free",
+    "receiver": null,
+    "signature": "RuntimeArgsData& GetCommonRuntimeArgs(const Program& program, KernelHandle kernel_id);",
+    "params": [
+      {
+        "name": "program",
+        "type": "const Program&",
+        "category": "const_lref"
+      },
+      {
+        "name": "kernel_id",
+        "type": "KernelHandle",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "RuntimeArgsData&",
+      "category": "lref"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::GetCommonRuntimeArgs",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/runtime_args.cc:59"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 353,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::shared_ptr<Buffer> CreateBuffer(const BufferConfig& config);",
+    "params": [
+      {
+        "name": "config",
+        "type": "const BufferConfig&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<Buffer>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateBuffer",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:168"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 368,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::shared_ptr<Buffer> CreateBuffer(const BufferConfig& config, DeviceAddr address);",
+    "params": [
+      {
+        "name": "config",
+        "type": "const BufferConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "address",
+        "type": "DeviceAddr",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<Buffer>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateBuffer",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:163"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 383,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::shared_ptr<Buffer> CreateBuffer(const BufferConfig& config, SubDeviceId sub_device_id);",
+    "params": [
+      {
+        "name": "config",
+        "type": "const BufferConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "sub_device_id",
+        "type": "SubDeviceId",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<Buffer>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateBuffer",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:166"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 397,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::shared_ptr<Buffer> CreateBuffer(const ShardedBufferConfig& config);",
+    "params": [
+      {
+        "name": "config",
+        "type": "const ShardedBufferConfig&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<Buffer>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateBuffer",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:183"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 412,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::shared_ptr<Buffer> CreateBuffer(const ShardedBufferConfig& config, DeviceAddr address);",
+    "params": [
+      {
+        "name": "config",
+        "type": "const ShardedBufferConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "address",
+        "type": "DeviceAddr",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<Buffer>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateBuffer",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:178"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 427,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::shared_ptr<Buffer> CreateBuffer(const ShardedBufferConfig& config, SubDeviceId sub_device_id);",
+    "params": [
+      {
+        "name": "config",
+        "type": "const ShardedBufferConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "sub_device_id",
+        "type": "SubDeviceId",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<Buffer>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateBuffer",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:181"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DeallocateBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 441,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void DeallocateBuffer(Buffer& buffer);",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "Buffer&",
+        "category": "lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::DeallocateBuffer",
+    "template": false,
+    "deprecated": true,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:219"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::AssignGlobalBufferToProgram",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 455,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void AssignGlobalBufferToProgram(const std::shared_ptr<Buffer>& buffer, Program& program);",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const std::shared_ptr<Buffer>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::AssignGlobalBufferToProgram",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:367"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateCircularBuffer",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 214,
+    "kind": "free",
+    "receiver": null,
+    "signature": "CBHandle CreateCircularBuffer(Program& program, const std::variant<CoreCoord, CoreRange, CoreRangeSet>& core_spec, const CircularBufferConfig& config);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "core_spec",
+        "type": "const std::variant<CoreCoord, CoreRange, CoreRangeSet>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "config",
+        "type": "const CircularBufferConfig&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "CBHandle",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateCircularBuffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:377"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::GetCircularBufferConfig",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 231,
+    "kind": "free",
+    "receiver": null,
+    "signature": "const CircularBufferConfig& GetCircularBufferConfig(Program& program, CBHandle cb_handle);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "cb_handle",
+        "type": "CBHandle",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "const CircularBufferConfig&",
+      "category": "const_lref"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::GetCircularBufferConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:383",
+      "src/tt_metal_cxx/buffer.cc:397"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::UpdateCircularBufferTotalSize",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 247,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void UpdateCircularBufferTotalSize(Program& program, CBHandle cb_handle, uint32_t total_size);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "cb_handle",
+        "type": "CBHandle",
+        "category": "value"
+      },
+      {
+        "name": "total_size",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::UpdateCircularBufferTotalSize",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:425"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::UpdateCircularBufferPageSize",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 263,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void UpdateCircularBufferPageSize(Program& program, CBHandle cb_handle, uint8_t buffer_index, uint32_t page_size);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "cb_handle",
+        "type": "CBHandle",
+        "category": "value"
+      },
+      {
+        "name": "buffer_index",
+        "type": "uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "page_size",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::UpdateCircularBufferPageSize",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:430"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::UpdateDynamicCircularBufferAddress",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 279,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void UpdateDynamicCircularBufferAddress(Program& program, CBHandle cb_handle, const Buffer& buffer);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "cb_handle",
+        "type": "CBHandle",
+        "category": "value"
+      },
+      {
+        "name": "buffer",
+        "type": "const Buffer&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::UpdateDynamicCircularBufferAddress",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:435"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::UpdateDynamicCircularBufferAddress",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 280,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void UpdateDynamicCircularBufferAddress(Program& program, CBHandle cb_handle, const Buffer& buffer, uint32_t address_offset);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "cb_handle",
+        "type": "CBHandle",
+        "category": "value"
+      },
+      {
+        "name": "buffer",
+        "type": "const Buffer&",
+        "category": "const_lref"
+      },
+      {
+        "name": "address_offset",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::UpdateDynamicCircularBufferAddress",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:442"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::UpdateDynamicCircularBufferAddressAndTotalSize",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 298,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void UpdateDynamicCircularBufferAddressAndTotalSize(Program& program, CBHandle cb_handle, const Buffer& buffer, uint32_t total_size);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "cb_handle",
+        "type": "CBHandle",
+        "category": "value"
+      },
+      {
+        "name": "buffer",
+        "type": "const Buffer&",
+        "category": "const_lref"
+      },
+      {
+        "name": "total_size",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::UpdateDynamicCircularBufferAddressAndTotalSize",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:449"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CreateSemaphore",
+    "header": "tt_metal/api/tt-metalium/host_api.hpp",
+    "line": 317,
+    "kind": "free",
+    "receiver": null,
+    "signature": "uint32_t CreateSemaphore(Program& program, const std::variant<CoreRange, CoreRangeSet>& core_spec, uint32_t initial_value);",
+    "params": [
+      {
+        "name": "program",
+        "type": "Program&",
+        "category": "lref"
+      },
+      {
+        "name": "core_spec",
+        "type": "const std::variant<CoreRange, CoreRangeSet>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "initial_value",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CreateSemaphore",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:455"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::sub_device_id",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 0,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::optional<SubDeviceId> sub_device_id() const;",
+    "params": [],
+    "return": {
+      "type": "std::optional<SubDeviceId>",
+      "category": "optional"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::sub_device_id",
+    "template": false,
+    "deprecated": false,
+    "unresolved": true,
+    "unresolved_reason": "called on Buffer at src/tt_metal_cxx/buffer.cc:201 but no sub_device_id() member is declared on Buffer in tt_metal/api/tt-metalium/buffer.hpp:158-209 (worktree and installed header identical); the method exists on BufferImpl (tt_metal/impl/buffers/buffer_impl.hpp:67)",
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:201"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::is_allocated",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 171,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool is_allocated() const;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::is_allocated",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:203",
+      "src/tt_metal_cxx/buffer.cc:216"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::address",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 174,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "uint32_t address() const;",
+    "params": [],
+    "return": {
+      "type": "uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::address",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:204"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::size",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 170,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "DeviceAddr size() const;",
+    "params": [],
+    "return": {
+      "type": "DeviceAddr",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:205"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::page_size",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 176,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "DeviceAddr page_size() const;",
+    "params": [],
+    "return": {
+      "type": "DeviceAddr",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::page_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:206"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::buffer_type",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 181,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "BufferType buffer_type() const;",
+    "params": [],
+    "return": {
+      "type": "BufferType",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::buffer_type",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:207"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::buffer_layout",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 187,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "TensorMemoryLayout buffer_layout() const;",
+    "params": [],
+    "return": {
+      "type": "TensorMemoryLayout",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::buffer_layout",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:208"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::has_shard_spec",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 197,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool has_shard_spec() const;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::has_shard_spec",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:224",
+      "src/tt_metal_cxx/buffer.cc:229",
+      "src/tt_metal_cxx/buffer.cc:246"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer::shard_spec",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 198,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "ShardSpecBuffer shard_spec() const;",
+    "params": [],
+    "return": {
+      "type": "ShardSpecBuffer",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Buffer::shard_spec",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:232",
+      "src/tt_metal_cxx/buffer.cc:250"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardSpecBuffer::grid",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 86,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "CoreRangeSet grid() const;",
+    "params": [],
+    "return": {
+      "type": "CoreRangeSet",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::ShardSpecBuffer::grid",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:251"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardSpecBuffer::shape",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 87,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::array<uint32_t, 2> shape() const;",
+    "params": [],
+    "return": {
+      "type": "std::array<uint32_t, 2>",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::ShardSpecBuffer::shape",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:234"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardSpecBuffer::orientation",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 88,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "ShardOrientation orientation() const;",
+    "params": [],
+    "return": {
+      "type": "ShardOrientation",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::ShardSpecBuffer::orientation",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:236"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CoreRangeSet::ranges",
+    "header": "tt_metal/api/tt-metalium/core_coord.hpp",
+    "line": 156,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "const std::vector<CoreRange>& ranges() const;",
+    "params": [],
+    "return": {
+      "type": "const std::vector<CoreRange>&",
+      "category": "const_lref"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CoreRangeSet::ranges",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:253"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig::total_size",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 89,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "uint32_t total_size() const;",
+    "params": [],
+    "return": {
+      "type": "uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CircularBufferConfig::total_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:386"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig::globally_allocated_address",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 91,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::optional<uint32_t> globally_allocated_address() const;",
+    "params": [],
+    "return": {
+      "type": "std::optional<uint32_t>",
+      "category": "optional"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CircularBufferConfig::globally_allocated_address",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:384"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig::buffer_indices",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 93,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "const std::unordered_set<uint8_t>& buffer_indices() const;",
+    "params": [],
+    "return": {
+      "type": "const std::unordered_set<uint8_t>&",
+      "category": "const_lref"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CircularBufferConfig::buffer_indices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:398"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig::index",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 132,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "Builder index(uint8_t buffer_index);",
+    "params": [
+      {
+        "name": "buffer_index",
+        "type": "uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "Builder",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CircularBufferConfig::index",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:188"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig::remote_index",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 133,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "Builder remote_index(uint8_t buffer_index);",
+    "params": [
+      {
+        "name": "buffer_index",
+        "type": "uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "Builder",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CircularBufferConfig::remote_index",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:188"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Tile::get_transpose_within_face",
+    "header": "tt_metal/api/tt-metalium/tile.hpp",
+    "line": 80,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool get_transpose_within_face() const;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Tile::get_transpose_within_face",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:192"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Tile::get_transpose_of_faces",
+    "header": "tt_metal/api/tt-metalium/tile.hpp",
+    "line": 81,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool get_transpose_of_faces() const;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Tile::get_transpose_of_faces",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:192"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Tile::Tile",
+    "header": "tt_metal/api/tt-metalium/tile.hpp",
+    "line": 35,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "Tile(TileShape tile_shape = {constants::TILE_HEIGHT, constants::TILE_WIDTH}, bool transpose_tile = false);",
+    "params": [
+      {
+        "name": "tile_shape",
+        "type": "TileShape",
+        "category": "value"
+      },
+      {
+        "name": "transpose_tile",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::Tile::Tile",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:101"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::SubDeviceId::SubDeviceId",
+    "header": "tt_metal/api/tt-metalium/sub_device_types.hpp",
+    "line": 13,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "(ttsl::StrongType<uint8_t, struct SubDeviceIdTag> implicit value constructor)",
+    "params": [
+      {
+        "name": "value",
+        "type": "uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::SubDeviceId::SubDeviceId",
+    "template": true,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:153"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardSpecBuffer::ShardSpecBuffer",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 72,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "ShardSpecBuffer(const CoreRangeSet& core_sets_, const std::array<uint32_t, 2>& shard_shape_, const ShardOrientation& shard_orientation_, const std::array<uint32_t, 2>& page_shape, const std::array<uint32_t, 2>& tensor2d_shape_in_pages);",
+    "params": [
+      {
+        "name": "core_sets_",
+        "type": "const CoreRangeSet&",
+        "category": "const_lref"
+      },
+      {
+        "name": "shard_shape_",
+        "type": "const std::array<uint32_t, 2>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "shard_orientation_",
+        "type": "const ShardOrientation&",
+        "category": "const_lref"
+      },
+      {
+        "name": "page_shape",
+        "type": "const std::array<uint32_t, 2>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "tensor2d_shape_in_pages",
+        "type": "const std::array<uint32_t, 2>&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::ShardSpecBuffer::ShardSpecBuffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:144"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardSpec::ShardSpec",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 48,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "ShardSpec(const CoreRangeSet& core_sets_, const std::array<uint32_t, 2>& shard_shape_, const ShardOrientation& shard_orientation_ = ShardOrientation::ROW_MAJOR);",
+    "params": [
+      {
+        "name": "core_sets_",
+        "type": "const CoreRangeSet&",
+        "category": "const_lref"
+      },
+      {
+        "name": "shard_shape_",
+        "type": "const std::array<uint32_t, 2>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "shard_orientation_",
+        "type": "const ShardOrientation&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::ShardSpec::ShardSpec",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:144"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CoreRangeSet::CoreRangeSet",
+    "header": "tt_metal/api/tt-metalium/core_coord.hpp",
+    "line": 133,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "CoreRangeSet(std::vector<CoreRange>&& core_ranges);",
+    "params": [
+      {
+        "name": "core_ranges",
+        "type": "std::vector<CoreRange>&&",
+        "category": "rref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CoreRangeSet::CoreRangeSet",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:139"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CoreRange::CoreRange",
+    "header": "tt_metal/api/tt-metalium/core_coord.hpp",
+    "line": 44,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "CoreRange(const CoreCoord& start_coord, const CoreCoord& end_coord);",
+    "params": [
+      {
+        "name": "start_coord",
+        "type": "const CoreCoord&",
+        "category": "const_lref"
+      },
+      {
+        "name": "end_coord",
+        "type": "const CoreCoord&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CoreRange::CoreRange",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:131"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig::CircularBufferConfig",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 42,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "CircularBufferConfig(uint32_t total_size);",
+    "params": [
+      {
+        "name": "total_size",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::CircularBufferConfig::CircularBufferConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:269"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshBuffer::create",
+    "header": "tt_metal/api/tt-metalium/mesh_buffer.hpp",
+    "line": 94,
+    "kind": "static",
+    "receiver": null,
+    "signature": "static std::shared_ptr<MeshBuffer> create(const MeshBufferConfig& mesh_buffer_config, const DeviceLocalBufferConfig& device_local_config, MeshDevice* mesh_device, std::optional<DeviceAddr> address = std::nullopt);",
+    "params": [
+      {
+        "name": "mesh_buffer_config",
+        "type": "const MeshBufferConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "device_local_config",
+        "type": "const DeviceLocalBufferConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "mesh_device",
+        "type": "MeshDevice*",
+        "category": "ptr"
+      },
+      {
+        "name": "address",
+        "type": "std::optional<DeviceAddr>",
+        "category": "optional"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<MeshBuffer>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshBuffer::create",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:65"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshBuffer::address",
+    "header": "tt_metal/api/tt-metalium/mesh_buffer.hpp",
+    "line": 121,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "DeviceAddr address() const;",
+    "params": [],
+    "return": {
+      "type": "DeviceAddr",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshBuffer::address",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:79"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshBuffer::size",
+    "header": "tt_metal/api/tt-metalium/mesh_buffer.hpp",
+    "line": 119,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "DeviceAddr size() const;",
+    "params": [],
+    "return": {
+      "type": "DeviceAddr",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshBuffer::size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:86"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshBuffer::is_allocated",
+    "header": "tt_metal/api/tt-metalium/mesh_buffer.hpp",
+    "line": 110,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool is_allocated() const;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshBuffer::is_allocated",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:90"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorAccessorArgs::TensorAccessorArgs",
+    "header": "tt_metal/api/tt-metalium/tensor_accessor_args.hpp",
+    "line": 28,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "explicit TensorAccessorArgs(const distributed::MeshBuffer& buffer, tensor_accessor::ArgsConfig args_config = tensor_accessor::ArgConfig::None);",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const distributed::MeshBuffer&",
+        "category": "const_lref"
+      },
+      {
+        "name": "args_config",
+        "type": "tensor_accessor::ArgsConfig",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::TensorAccessorArgs::TensorAccessorArgs",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:97"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorAccessorArgs::get_compile_time_args",
+    "header": "tt_metal/api/tt-metalium/tensor_accessor_args.hpp",
+    "line": 56,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::vector<uint32_t> get_compile_time_args() const;",
+    "params": [],
+    "return": {
+      "type": "std::vector<uint32_t>",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::TensorAccessorArgs::get_compile_time_args",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:97"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::close",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 197,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "bool close() override;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::close",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:55"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::enable_program_cache",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 198,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void enable_program_cache() override;",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::enable_program_cache",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:108"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::clear_program_cache",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 199,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void clear_program_cache() override;",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::clear_program_cache",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:115"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::disable_and_clear_program_cache",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 200,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void disable_and_clear_program_cache() override;",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::disable_and_clear_program_cache",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:122"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::num_program_cache_entries",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 202,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::size_t num_program_cache_entries() override;",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::num_program_cache_entries",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:129"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::num_devices",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 244,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "size_t num_devices() const;",
+    "params": [],
+    "return": {
+      "type": "size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::num_devices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:73"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::num_rows",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 248,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "size_t num_rows() const;",
+    "params": [],
+    "return": {
+      "type": "size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::num_rows",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:80"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::num_cols",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 249,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "size_t num_cols() const;",
+    "params": [],
+    "return": {
+      "type": "size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::num_cols",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:87"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::compute_with_storage_grid_size",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 144,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "CoreCoord compute_with_storage_grid_size() const override;",
+    "params": [],
+    "return": {
+      "type": "CoreCoord",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::compute_with_storage_grid_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:94",
+      "src/tt_metal_cxx/distributed.cc:101"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::mesh_command_queue",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 312,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "MeshCommandQueue& mesh_command_queue(std::optional<uint8_t> cq_id = std::nullopt) const;",
+    "params": [
+      {
+        "name": "cq_id",
+        "type": "std::optional<uint8_t>",
+        "category": "optional"
+      }
+    ],
+    "return": {
+      "type": "MeshCommandQueue&",
+      "category": "lref"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::mesh_command_queue",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:140",
+      "src/tt_metal_cxx/distributed.cc:201",
+      "src/tt_metal_cxx/distributed.cc:214"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::shape",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 259,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "const MeshShape& shape() const;",
+    "params": [],
+    "return": {
+      "type": "const MeshShape&",
+      "category": "const_lref"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::shape",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:157"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice::create_unit_mesh",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 325,
+    "kind": "static",
+    "receiver": null,
+    "signature": "static std::shared_ptr<MeshDevice> create_unit_mesh(int device_id, size_t l1_small_size = DEFAULT_L1_SMALL_SIZE, size_t trace_region_size = DEFAULT_TRACE_REGION_SIZE, size_t num_command_queues = 1, const DispatchCoreConfig& dispatch_core_config = DispatchCoreConfig{}, ttsl::Span<const std::uint32_t> l1_bank_remap = {}, size_t worker_l1_size = DEFAULT_WORKER_L1_SIZE);",
+    "params": [
+      {
+        "name": "device_id",
+        "type": "int",
+        "category": "value"
+      },
+      {
+        "name": "l1_small_size",
+        "type": "size_t",
+        "category": "value"
+      },
+      {
+        "name": "trace_region_size",
+        "type": "size_t",
+        "category": "value"
+      },
+      {
+        "name": "num_command_queues",
+        "type": "size_t",
+        "category": "value"
+      },
+      {
+        "name": "dispatch_core_config",
+        "type": "const DispatchCoreConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "l1_bank_remap",
+        "type": "ttsl::Span<const std::uint32_t>",
+        "category": "span"
+      },
+      {
+        "name": "worker_l1_size",
+        "type": "size_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::shared_ptr<MeshDevice>",
+      "category": "shared_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshDevice::create_unit_mesh",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:180"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::EnqueueMeshWorkload",
+    "header": "tt_metal/api/tt-metalium/mesh_workload.hpp",
+    "line": 18,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void EnqueueMeshWorkload(MeshCommandQueue& mesh_cq, MeshWorkload& mesh_workload, bool blocking);",
+    "params": [
+      {
+        "name": "mesh_cq",
+        "type": "MeshCommandQueue&",
+        "category": "lref"
+      },
+      {
+        "name": "mesh_workload",
+        "type": "MeshWorkload&",
+        "category": "lref"
+      },
+      {
+        "name": "blocking",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::EnqueueMeshWorkload",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:141"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshWorkload::MeshWorkload",
+    "header": "tt_metal/api/tt-metalium/mesh_workload.hpp",
+    "line": 29,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "MeshWorkload();",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshWorkload::MeshWorkload",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:33"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshWorkload::add_program",
+    "header": "tt_metal/api/tt-metalium/mesh_workload.hpp",
+    "line": 35,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_program(const MeshCoordinateRange& device_range, Program&& program);",
+    "params": [
+      {
+        "name": "device_range",
+        "type": "const MeshCoordinateRange&",
+        "category": "const_lref"
+      },
+      {
+        "name": "program",
+        "type": "Program&&",
+        "category": "rref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshWorkload::add_program",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:156"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshCommandQueue::enqueue_write_mesh_buffer",
+    "header": "tt_metal/api/tt-metalium/mesh_command_queue.hpp",
+    "line": 85,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "virtual void enqueue_write_mesh_buffer(const std::shared_ptr<MeshBuffer>& buffer, const void* host_data, bool blocking) = 0;",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const std::shared_ptr<MeshBuffer>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "host_data",
+        "type": "const void*",
+        "category": "ptr"
+      },
+      {
+        "name": "blocking",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshCommandQueue::enqueue_write_mesh_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:202"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshCommandQueue::enqueue_read_mesh_buffer",
+    "header": "tt_metal/api/tt-metalium/mesh_command_queue.hpp",
+    "line": 107,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "virtual void enqueue_read_mesh_buffer(void* host_data, const std::shared_ptr<MeshBuffer>& buffer, bool blocking) = 0;",
+    "params": [
+      {
+        "name": "host_data",
+        "type": "void*",
+        "category": "ptr"
+      },
+      {
+        "name": "buffer",
+        "type": "const std::shared_ptr<MeshBuffer>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "blocking",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshCommandQueue::enqueue_read_mesh_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:215"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshCoordinateRange::MeshCoordinateRange",
+    "header": "tt_metal/api/tt-metalium/mesh_coord.hpp",
+    "line": 125,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "MeshCoordinateRange(const MeshCoordinate& start, const MeshCoordinate& end);",
+    "params": [
+      {
+        "name": "start",
+        "type": "const MeshCoordinate&",
+        "category": "const_lref"
+      },
+      {
+        "name": "end",
+        "type": "const MeshCoordinate&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::distributed::MeshCoordinateRange::MeshCoordinateRange",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:157"
+    ]
+  },
+  {
+    "qualified_name": "tilize_nfaces",
+    "header": "tt_metal/api/tt-metalium/tilize_utils.hpp",
+    "line": 89,
+    "kind": "free",
+    "receiver": null,
+    "signature": "template <typename T> std::vector<T> tilize_nfaces(const std::vector<T>& input, uint32_t m, uint32_t n);",
+    "params": [
+      {
+        "name": "input",
+        "type": "const std::vector<T>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "m",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "n",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::vector<T>",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tilize_nfaces",
+    "template": true,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:55"
+    ]
+  },
+  {
+    "qualified_name": "untilize_nfaces",
+    "header": "tt_metal/api/tt-metalium/tilize_utils.hpp",
+    "line": 92,
+    "kind": "free",
+    "receiver": null,
+    "signature": "template <typename T> std::vector<T> untilize_nfaces(const std::vector<T>& input, uint32_t m, uint32_t n);",
+    "params": [
+      {
+        "name": "input",
+        "type": "const std::vector<T>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "m",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "n",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::vector<T>",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "untilize_nfaces",
+    "template": true,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:62"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorSpec::TensorSpec",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/tensor_spec.hpp",
+    "line": 21,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "TensorSpec(tt::tt_metal::Shape logical_shape, TensorLayout tensor_layout);",
+    "params": [
+      {
+        "name": "logical_shape",
+        "type": "tt::tt_metal::Shape",
+        "category": "value"
+      },
+      {
+        "name": "tensor_layout",
+        "type": "TensorLayout",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::TensorSpec::TensorSpec",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:79"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorLayout::TensorLayout",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/layout/tensor_layout.hpp",
+    "line": 34,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "TensorLayout(DataType dtype, const PageConfig& page_config, const MemoryConfig& memory_config, const Alignment& alignment = {});",
+    "params": [
+      {
+        "name": "dtype",
+        "type": "DataType",
+        "category": "value"
+      },
+      {
+        "name": "page_config",
+        "type": "const PageConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "memory_config",
+        "type": "const MemoryConfig&",
+        "category": "const_lref"
+      },
+      {
+        "name": "alignment",
+        "type": "const Alignment&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::TensorLayout::TensorLayout",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:81"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::PageConfig::PageConfig",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/layout/page_config.hpp",
+    "line": 34,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "PageConfig(Layout layout);",
+    "params": [
+      {
+        "name": "layout",
+        "type": "Layout",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::PageConfig::PageConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:83"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::MemoryConfig::MemoryConfig",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/layout/memory_config/memory_config.hpp",
+    "line": 30,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "MemoryConfig();",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::MemoryConfig::MemoryConfig",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:84"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::HostTensor::from_vector",
+    "header": "tt_metal/api/tt-metalium/tensor/host_tensor.hpp",
+    "line": 119,
+    "kind": "static",
+    "receiver": null,
+    "signature": "template <typename T> static HostTensor from_vector(const std::vector<T>& buffer, TensorSpec spec);",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const std::vector<T>&",
+        "category": "const_lref"
+      },
+      {
+        "name": "spec",
+        "type": "TensorSpec",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "HostTensor",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::HostTensor::from_vector",
+    "template": true,
+    "deprecated": false,
+    "unresolved": true,
+    "unresolved_reason": "tilize.cc:148 calls from_vector<float>(logical, spec, 0.0f) with three arguments; only the 2-arg overloads (host_tensor.hpp:119,127) exist in the pinned worktree and installed headers; the 3-arg form is not declared anywhere in tt_metal/api",
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:148"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::host_buffer::get_host_buffer",
+    "header": "tt_metal/api/tt-metalium/tensor/tensor_apis.hpp",
+    "line": 42,
+    "kind": "free",
+    "receiver": null,
+    "signature": "HostBuffer get_host_buffer(const HostTensor& tensor);",
+    "params": [
+      {
+        "name": "tensor",
+        "type": "const HostTensor&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "HostBuffer",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::host_buffer::get_host_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:149"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::HostBuffer::view_bytes",
+    "header": "tt_metal/api/tt-metalium/host_buffer.hpp",
+    "line": 54,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "ttsl::Span<const std::byte> view_bytes() const& noexcept;",
+    "params": [],
+    "return": {
+      "type": "ttsl::Span<const std::byte>",
+      "category": "span"
+    },
+    "noexcept": true,
+    "overload_group": "tt::tt_metal::HostBuffer::view_bytes",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:150"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::HostBuffer::HostBuffer",
+    "header": "tt_metal/api/tt-metalium/host_buffer.hpp",
+    "line": 39,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "template <typename T> explicit HostBuffer(std::vector<T>&& data);",
+    "params": [
+      {
+        "name": "data",
+        "type": "std::vector<T>&&",
+        "category": "rref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::HostBuffer::HostBuffer",
+    "template": true,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:169"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::HostTensor::HostTensor",
+    "header": "tt_metal/api/tt-metalium/tensor/host_tensor.hpp",
+    "line": 0,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "(no matching public constructor: called as HostTensor(std::move(host_buffer), spec, tt::tt_metal::TensorTopology()) at tilize.cc:170; the closest is the static factory from_buffer(HostBuffer, TensorSpec) at host_tensor.hpp:92)",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "HostBuffer",
+        "category": "value"
+      },
+      {
+        "name": "spec",
+        "type": "TensorSpec",
+        "category": "value"
+      },
+      {
+        "name": "topology",
+        "type": "TensorTopology",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::HostTensor::HostTensor",
+    "template": false,
+    "deprecated": false,
+    "unresolved": true,
+    "unresolved_reason": "tilize.cc:170 constructs HostTensor from (HostBuffer, TensorSpec, TensorTopology); no such public constructor is declared in host_tensor.hpp:40-204 (from_buffer takes two args, no topology parameter)",
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:170"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::HostTensor::to_vector",
+    "header": "tt_metal/api/tt-metalium/tensor/host_tensor.hpp",
+    "line": 137,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "template <typename T> std::vector<T> to_vector() const;",
+    "params": [],
+    "return": {
+      "type": "std::vector<T>",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::HostTensor::to_vector",
+    "template": true,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:171"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorSpec::compute_packed_buffer_size_bytes",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/tensor_spec.hpp",
+    "line": 91,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "size_t compute_packed_buffer_size_bytes() const;",
+    "params": [],
+    "return": {
+      "type": "size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::TensorSpec::compute_packed_buffer_size_bytes",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:163"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorTopology::TensorTopology",
+    "header": "tt_metal/api/tt-metalium/experimental/distributed_tensor/topology/tensor_topology.hpp",
+    "line": 14,
+    "kind": "constructor",
+    "receiver": null,
+    "signature": "TensorTopology();",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt::tt_metal::TensorTopology::TensorTopology",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:170"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::throw_invalid_argument",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/runtime.hpp",
+    "line": 21,
+    "kind": "free",
+    "receiver": null,
+    "signature": "void throw_invalid_argument(rust::Str message);",
+    "params": [
+      {
+        "name": "message",
+        "type": "rust::Str",
+        "category": "str"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::throw_invalid_argument",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:95"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_device",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/device.hpp",
+    "line": 37,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<DeviceHandle> create_device(std::int32_t device_id);",
+    "params": [
+      {
+        "name": "device_id",
+        "type": "std::int32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::unique_ptr<DeviceHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_device",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:96"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_interleaved_buffer",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 84,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<BufferHandle> create_interleaved_buffer(const DeviceHandle& device, const InterleavedBufferConfigRepr& config, const BufferCreateOptionsRepr& options);",
+    "params": [
+      {
+        "name": "device",
+        "type": "const DeviceHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "config",
+        "type": "const InterleavedBufferConfigRepr&",
+        "category": "const_lref"
+      },
+      {
+        "name": "options",
+        "type": "const BufferCreateOptionsRepr&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::unique_ptr<BufferHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_interleaved_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:97"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_sharded_buffer",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 88,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<BufferHandle> create_sharded_buffer(const DeviceHandle& device, const ShardedBufferConfigRepr& config, rust::Slice<const CoreRangeRepr> core_ranges, const BufferCreateOptionsRepr& options);",
+    "params": [
+      {
+        "name": "device",
+        "type": "const DeviceHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "config",
+        "type": "const ShardedBufferConfigRepr&",
+        "category": "const_lref"
+      },
+      {
+        "name": "core_ranges",
+        "type": "rust::Slice<const CoreRangeRepr>",
+        "category": "span"
+      },
+      {
+        "name": "options",
+        "type": "const BufferCreateOptionsRepr&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::unique_ptr<BufferHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_sharded_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:102"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_circular_buffer_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 93,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<CircularBufferConfigHandle> create_circular_buffer_config(std::uint32_t total_size);",
+    "params": [
+      {
+        "name": "total_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::unique_ptr<CircularBufferConfigHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_circular_buffer_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:108"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_program",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 130,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<ProgramHandle> create_program();",
+    "params": [],
+    "return": {
+      "type": "std::unique_ptr<ProgramHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_program",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:109"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_compute_kernel_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 67,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<ComputeKernelConfigHandle> create_compute_kernel_config();",
+    "params": [],
+    "return": {
+      "type": "std::unique_ptr<ComputeKernelConfigHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_compute_kernel_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:110"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_data_movement_kernel_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 68,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<DataMovementKernelConfigHandle> create_data_movement_kernel_config();",
+    "params": [],
+    "return": {
+      "type": "std::unique_ptr<DataMovementKernelConfigHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_data_movement_kernel_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:111"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_reader_data_movement_kernel_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 69,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<DataMovementKernelConfigHandle> create_reader_data_movement_kernel_config();",
+    "params": [],
+    "return": {
+      "type": "std::unique_ptr<DataMovementKernelConfigHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_reader_data_movement_kernel_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:112"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_writer_data_movement_kernel_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 70,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<DataMovementKernelConfigHandle> create_writer_data_movement_kernel_config();",
+    "params": [],
+    "return": {
+      "type": "std::unique_ptr<DataMovementKernelConfigHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_writer_data_movement_kernel_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:114"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_unit_mesh",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 82,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<MeshDeviceHandle> create_unit_mesh(std::int32_t device_id);",
+    "params": [
+      {
+        "name": "device_id",
+        "type": "std::int32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::unique_ptr<MeshDeviceHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_unit_mesh",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:116"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_mesh_workload",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 83,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<MeshWorkloadHandle> create_mesh_workload();",
+    "params": [],
+    "return": {
+      "type": "std::unique_ptr<MeshWorkloadHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_mesh_workload",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:117"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::get_num_available_devices",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/device.hpp",
+    "line": 38,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::size_t get_num_available_devices();",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::get_num_available_devices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:371"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::get_num_pcie_devices",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/device.hpp",
+    "line": 39,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::size_t get_num_pcie_devices();",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::get_num_pcie_devices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:372"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::tilize",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/tilize.hpp",
+    "line": 17,
+    "kind": "free",
+    "receiver": null,
+    "signature": "rust::Vec<uint8_t> tilize(rust::Slice<const uint8_t> data, uint32_t m, uint32_t n, uint32_t elem_size);",
+    "params": [
+      {
+        "name": "data",
+        "type": "rust::Slice<const uint8_t>",
+        "category": "span"
+      },
+      {
+        "name": "m",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "n",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "elem_size",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "rust::Vec<uint8_t>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::tilize",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:374"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::untilize",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/tilize.hpp",
+    "line": 26,
+    "kind": "free",
+    "receiver": null,
+    "signature": "rust::Vec<uint8_t> untilize(rust::Slice<const uint8_t> data, uint32_t m, uint32_t n, uint32_t elem_size);",
+    "params": [
+      {
+        "name": "data",
+        "type": "rust::Slice<const uint8_t>",
+        "category": "span"
+      },
+      {
+        "name": "m",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "n",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "elem_size",
+        "type": "uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "rust::Vec<uint8_t>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::untilize",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:375"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::tilize_with_data_format",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/tilize.hpp",
+    "line": 34,
+    "kind": "free",
+    "receiver": null,
+    "signature": "rust::Vec<uint8_t> tilize_with_data_format(rust::Slice<const uint8_t> data, uint32_t m, uint32_t n, uint8_t data_format);",
+    "params": [
+      {
+        "name": "data",
+        "type": "rust::Slice<const uint8_t>",
+        "category": "span"
+      },
+      {
+        "name": "m",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "n",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "data_format",
+        "type": "uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "rust::Vec<uint8_t>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::tilize_with_data_format",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:376"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::untilize_with_data_format",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/tilize.hpp",
+    "line": 39,
+    "kind": "free",
+    "receiver": null,
+    "signature": "rust::Vec<uint8_t> untilize_with_data_format(rust::Slice<const uint8_t> data, uint32_t m, uint32_t n, uint8_t data_format);",
+    "params": [
+      {
+        "name": "data",
+        "type": "rust::Slice<const uint8_t>",
+        "category": "span"
+      },
+      {
+        "name": "m",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "n",
+        "type": "uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "data_format",
+        "type": "uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "rust::Vec<uint8_t>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::untilize_with_data_format",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:378"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::create_replicated_mesh_buffer",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/mesh_buffer.hpp",
+    "line": 45,
+    "kind": "free",
+    "receiver": null,
+    "signature": "std::unique_ptr<MeshBufferHandle> create_replicated_mesh_buffer(const MeshDeviceHandle& mesh_device, std::uint64_t size_bytes, std::uint64_t page_size, std::uint8_t buffer_type);",
+    "params": [
+      {
+        "name": "mesh_device",
+        "type": "const MeshDeviceHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "size_bytes",
+        "type": "std::uint64_t",
+        "category": "value"
+      },
+      {
+        "name": "page_size",
+        "type": "std::uint64_t",
+        "category": "value"
+      },
+      {
+        "name": "buffer_type",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::unique_ptr<MeshBufferHandle>",
+      "category": "unique_ptr"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::create_replicated_mesh_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:385"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DeviceHandle::close",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/device.hpp",
+    "line": 27,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "bool close();",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DeviceHandle::close",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:119"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DeviceHandle::is_open",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/device.hpp",
+    "line": 28,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool is_open() const noexcept;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": true,
+    "overload_group": "tt_metal_cxx::DeviceHandle::is_open",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:120"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DeviceHandle::device_id",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/device.hpp",
+    "line": 29,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::int32_t device_id() const noexcept;",
+    "params": [],
+    "return": {
+      "type": "std::int32_t",
+      "category": "value"
+    },
+    "noexcept": true,
+    "overload_group": "tt_metal_cxx::DeviceHandle::device_id",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:121"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferHandle::info",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 39,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "BufferInfoRepr info() const;",
+    "params": [],
+    "return": {
+      "type": "BufferInfoRepr",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::BufferHandle::info",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:123"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferHandle::deallocate",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 40,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "bool deallocate();",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::BufferHandle::deallocate",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:124"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferHandle::has_shard_spec",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 41,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool has_shard_spec() const;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::BufferHandle::has_shard_spec",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:125"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferHandle::shard_spec_metadata",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 42,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "ShardSpecBufferMetadataRepr shard_spec_metadata() const;",
+    "params": [],
+    "return": {
+      "type": "ShardSpecBufferMetadataRepr",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::BufferHandle::shard_spec_metadata",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:126"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferHandle::shard_spec_core_ranges",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 43,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "rust::Vec<CoreRangeRepr> shard_spec_core_ranges() const;",
+    "params": [],
+    "return": {
+      "type": "rust::Vec<CoreRangeRepr>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::BufferHandle::shard_spec_core_ranges",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:127"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_total_size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 63,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_total_size(std::uint32_t total_size);",
+    "params": [
+      {
+        "name": "total_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_total_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:129"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_address_offset",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 64,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_address_offset(std::uint32_t offset);",
+    "params": [
+      {
+        "name": "offset",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_address_offset",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:130"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_globally_allocated_address",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 65,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_globally_allocated_address(const BufferHandle& buffer);",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const BufferHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_globally_allocated_address",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:131"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_globally_allocated_address_and_total_size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 66,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_globally_allocated_address_and_total_size(const BufferHandle& buffer, std::uint32_t total_size);",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const BufferHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "total_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_globally_allocated_address_and_total_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:135"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_index_data_format",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 67,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_index_data_format(std::uint8_t buffer_index, bool remote, std::uint8_t data_format);",
+    "params": [
+      {
+        "name": "buffer_index",
+        "type": "std::uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "remote",
+        "type": "bool",
+        "category": "value"
+      },
+      {
+        "name": "data_format",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_index_data_format",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:140"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_index_total_size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 68,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_index_total_size(std::uint8_t buffer_index, bool remote, std::uint32_t total_size);",
+    "params": [
+      {
+        "name": "buffer_index",
+        "type": "std::uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "remote",
+        "type": "bool",
+        "category": "value"
+      },
+      {
+        "name": "total_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_index_total_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:146"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_index_page_size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 69,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_index_page_size(std::uint8_t buffer_index, bool remote, std::uint32_t page_size);",
+    "params": [
+      {
+        "name": "buffer_index",
+        "type": "std::uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "remote",
+        "type": "bool",
+        "category": "value"
+      },
+      {
+        "name": "page_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_index_page_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:152"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle::set_index_tile",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 70,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_index_tile(std::uint8_t buffer_index, bool remote, std::uint32_t tile_height, std::uint32_t tile_width, bool transpose_tile);",
+    "params": [
+      {
+        "name": "buffer_index",
+        "type": "std::uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "remote",
+        "type": "bool",
+        "category": "value"
+      },
+      {
+        "name": "tile_height",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "tile_width",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "transpose_tile",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::CircularBufferConfigHandle::set_index_tile",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:158"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::runtime_id",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 39,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::uint64_t runtime_id() const;",
+    "params": [],
+    "return": {
+      "type": "std::uint64_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::runtime_id",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:167"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::set_runtime_id",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 40,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_runtime_id(std::uint64_t runtime_id);",
+    "params": [
+      {
+        "name": "runtime_id",
+        "type": "std::uint64_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::set_runtime_id",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:168"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::set_runtime_args",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 41,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_runtime_args(std::uint32_t kernel_id, std::uint32_t core_x, std::uint32_t core_y, rust::Slice<const std::uint32_t> runtime_args);",
+    "params": [
+      {
+        "name": "kernel_id",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "runtime_args",
+        "type": "rust::Slice<const std::uint32_t>",
+        "category": "span"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::set_runtime_args",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:169"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::get_runtime_args",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 46,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "rust::Vec<std::uint32_t> get_runtime_args(std::uint32_t kernel_id, std::uint32_t core_x, std::uint32_t core_y) const;",
+    "params": [
+      {
+        "name": "kernel_id",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "rust::Vec<std::uint32_t>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::get_runtime_args",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:176"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::set_common_runtime_args",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 47,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_common_runtime_args(std::uint32_t kernel_id, rust::Slice<const std::uint32_t> runtime_args);",
+    "params": [
+      {
+        "name": "kernel_id",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "runtime_args",
+        "type": "rust::Slice<const std::uint32_t>",
+        "category": "span"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::set_common_runtime_args",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:182"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::get_common_runtime_args",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 48,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "rust::Vec<std::uint32_t> get_common_runtime_args(std::uint32_t kernel_id) const;",
+    "params": [
+      {
+        "name": "kernel_id",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "rust::Vec<std::uint32_t>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::get_common_runtime_args",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:187"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_compute_kernel",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 49,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_compute_kernel(rust::Str file_name, std::uint32_t core_x, std::uint32_t core_y);",
+    "params": [
+      {
+        "name": "file_name",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_compute_kernel",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:188"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 50,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_compute_kernel_from_string(rust::Str kernel_src_code, std::uint32_t core_x, std::uint32_t core_y);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:194"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_compute_kernel_with_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 52,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_compute_kernel_with_config(rust::Str file_name, std::uint32_t core_x, std::uint32_t core_y, const ComputeKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "file_name",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "config",
+        "type": "const ComputeKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_compute_kernel_with_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:200"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string_with_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 57,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_compute_kernel_from_string_with_config(rust::Str kernel_src_code, std::uint32_t core_x, std::uint32_t core_y, const ComputeKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "config",
+        "type": "const ComputeKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string_with_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:207"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string_with_config_range",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 62,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_compute_kernel_from_string_with_config_range(rust::Str kernel_src_code, std::uint32_t start_x, std::uint32_t start_y, std::uint32_t end_x, std::uint32_t end_y, const ComputeKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "start_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "start_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "end_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "end_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "config",
+        "type": "const ComputeKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string_with_config_range",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:214"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string_with_config_ranges",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 69,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_compute_kernel_from_string_with_config_ranges(rust::Str kernel_src_code, rust::Slice<const CoreRangeRepr> core_ranges, const ComputeKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_ranges",
+        "type": "rust::Slice<const CoreRangeRepr>",
+        "category": "span"
+      },
+      {
+        "name": "config",
+        "type": "const ComputeKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_compute_kernel_from_string_with_config_ranges",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:223"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 73,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_data_movement_kernel(rust::Str file_name, std::uint32_t core_x, std::uint32_t core_y, std::uint8_t processor, std::uint8_t noc);",
+    "params": [
+      {
+        "name": "file_name",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "processor",
+        "type": "std::uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "noc",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:229"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 79,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_data_movement_kernel_from_string(rust::Str kernel_src_code, std::uint32_t core_x, std::uint32_t core_y, std::uint8_t processor, std::uint8_t noc);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "processor",
+        "type": "std::uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "noc",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:237"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_with_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 85,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_data_movement_kernel_with_config(rust::Str file_name, std::uint32_t core_x, std::uint32_t core_y, const DataMovementKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "file_name",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "config",
+        "type": "const DataMovementKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_with_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:245"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string_with_config",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 90,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_data_movement_kernel_from_string_with_config(rust::Str kernel_src_code, std::uint32_t core_x, std::uint32_t core_y, const DataMovementKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "core_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "config",
+        "type": "const DataMovementKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string_with_config",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:252"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string_with_config_range",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 95,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_data_movement_kernel_from_string_with_config_range(rust::Str kernel_src_code, std::uint32_t start_x, std::uint32_t start_y, std::uint32_t end_x, std::uint32_t end_y, const DataMovementKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "start_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "start_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "end_x",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "end_y",
+        "type": "std::uint32_t",
+        "category": "value"
+      },
+      {
+        "name": "config",
+        "type": "const DataMovementKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string_with_config_range",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:259"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string_with_config_ranges",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 102,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_data_movement_kernel_from_string_with_config_ranges(rust::Str kernel_src_code, rust::Slice<const CoreRangeRepr> core_ranges, const DataMovementKernelConfigHandle& config);",
+    "params": [
+      {
+        "name": "kernel_src_code",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "core_ranges",
+        "type": "rust::Slice<const CoreRangeRepr>",
+        "category": "span"
+      },
+      {
+        "name": "config",
+        "type": "const DataMovementKernelConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_data_movement_kernel_from_string_with_config_ranges",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:268"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::assign_global_buffer",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 106,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void assign_global_buffer(const BufferHandle& buffer);",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const BufferHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::assign_global_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:274"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_circular_buffer",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 107,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uintptr_t create_circular_buffer(rust::Slice<const CoreRangeRepr> core_ranges, const CircularBufferConfigHandle& config);",
+    "params": [
+      {
+        "name": "core_ranges",
+        "type": "rust::Slice<const CoreRangeRepr>",
+        "category": "span"
+      },
+      {
+        "name": "config",
+        "type": "const CircularBufferConfigHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "std::uintptr_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_circular_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:276"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::get_circular_buffer_metadata",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 109,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "CircularBufferMetadataRepr get_circular_buffer_metadata(std::uintptr_t cb_handle) const;",
+    "params": [
+      {
+        "name": "cb_handle",
+        "type": "std::uintptr_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "CircularBufferMetadataRepr",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::get_circular_buffer_metadata",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:281"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::get_circular_buffer_indices",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 110,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "rust::Vec<CircularBufferIndexConfigRepr> get_circular_buffer_indices(std::uintptr_t cb_handle) const;",
+    "params": [
+      {
+        "name": "cb_handle",
+        "type": "std::uintptr_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "rust::Vec<CircularBufferIndexConfigRepr>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::get_circular_buffer_indices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:285"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::update_circular_buffer_total_size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 111,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void update_circular_buffer_total_size(std::uintptr_t cb_handle, std::uint32_t total_size);",
+    "params": [
+      {
+        "name": "cb_handle",
+        "type": "std::uintptr_t",
+        "category": "value"
+      },
+      {
+        "name": "total_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::update_circular_buffer_total_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:289"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::update_circular_buffer_page_size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 112,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void update_circular_buffer_page_size(std::uintptr_t cb_handle, std::uint8_t buffer_index, std::uint32_t page_size);",
+    "params": [
+      {
+        "name": "cb_handle",
+        "type": "std::uintptr_t",
+        "category": "value"
+      },
+      {
+        "name": "buffer_index",
+        "type": "std::uint8_t",
+        "category": "value"
+      },
+      {
+        "name": "page_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::update_circular_buffer_page_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:294"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::update_dynamic_circular_buffer_address",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 114,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void update_dynamic_circular_buffer_address(std::uintptr_t cb_handle, const BufferHandle& buffer);",
+    "params": [
+      {
+        "name": "cb_handle",
+        "type": "std::uintptr_t",
+        "category": "value"
+      },
+      {
+        "name": "buffer",
+        "type": "const BufferHandle&",
+        "category": "const_lref"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::update_dynamic_circular_buffer_address",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:300"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::update_dynamic_circular_buffer_address_with_offset",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 115,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void update_dynamic_circular_buffer_address_with_offset(std::uintptr_t cb_handle, const BufferHandle& buffer, std::uint32_t address_offset);",
+    "params": [
+      {
+        "name": "cb_handle",
+        "type": "std::uintptr_t",
+        "category": "value"
+      },
+      {
+        "name": "buffer",
+        "type": "const BufferHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "address_offset",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::update_dynamic_circular_buffer_address_with_offset",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:305"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::update_dynamic_circular_buffer_address_and_total_size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 117,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void update_dynamic_circular_buffer_address_and_total_size(std::uintptr_t cb_handle, const BufferHandle& buffer, std::uint32_t total_size);",
+    "params": [
+      {
+        "name": "cb_handle",
+        "type": "std::uintptr_t",
+        "category": "value"
+      },
+      {
+        "name": "buffer",
+        "type": "const BufferHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "total_size",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::update_dynamic_circular_buffer_address_and_total_size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:311"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle::create_semaphore",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 119,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "std::uint32_t create_semaphore(rust::Slice<const CoreRangeRepr> core_ranges, std::uint32_t initial_value);",
+    "params": [
+      {
+        "name": "core_ranges",
+        "type": "rust::Slice<const CoreRangeRepr>",
+        "category": "span"
+      },
+      {
+        "name": "initial_value",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ProgramHandle::create_semaphore",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:317"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::set_math_fidelity",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 25,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_math_fidelity(std::uint8_t math_fidelity);",
+    "params": [
+      {
+        "name": "math_fidelity",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::set_math_fidelity",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:323"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::set_fp32_dest_acc_en",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 26,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_fp32_dest_acc_en(bool enabled);",
+    "params": [
+      {
+        "name": "enabled",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::set_fp32_dest_acc_en",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:324"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::set_dst_full_sync_en",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 27,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_dst_full_sync_en(bool enabled);",
+    "params": [
+      {
+        "name": "enabled",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::set_dst_full_sync_en",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:325"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::fill_unpack_to_dest_modes",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 28,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void fill_unpack_to_dest_modes(std::uint8_t mode);",
+    "params": [
+      {
+        "name": "mode",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::fill_unpack_to_dest_modes",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:326"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::set_bfp8_pack_precise",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 29,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_bfp8_pack_precise(bool enabled);",
+    "params": [
+      {
+        "name": "enabled",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::set_bfp8_pack_precise",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:327"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::set_math_approx_mode",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 30,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_math_approx_mode(bool enabled);",
+    "params": [
+      {
+        "name": "enabled",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::set_math_approx_mode",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:328"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::add_compile_arg",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 31,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_compile_arg(std::uint32_t arg);",
+    "params": [
+      {
+        "name": "arg",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::add_compile_arg",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:329"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::add_define",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 32,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_define(rust::Str key, rust::Str value);",
+    "params": [
+      {
+        "name": "key",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "value",
+        "type": "rust::Str",
+        "category": "str"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::add_define",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:330"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::add_named_compile_arg",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 33,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_named_compile_arg(rust::Str key, std::uint32_t value);",
+    "params": [
+      {
+        "name": "key",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "value",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::add_named_compile_arg",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:331"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle::set_opt_level",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 34,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_opt_level(std::uint8_t opt_level);",
+    "params": [
+      {
+        "name": "opt_level",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::ComputeKernelConfigHandle::set_opt_level",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:332"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle::set_processor",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 53,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_processor(std::uint8_t processor);",
+    "params": [
+      {
+        "name": "processor",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DataMovementKernelConfigHandle::set_processor",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:334"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle::set_noc",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 54,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_noc(std::uint8_t noc);",
+    "params": [
+      {
+        "name": "noc",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DataMovementKernelConfigHandle::set_noc",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:335"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle::set_noc_mode",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 55,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_noc_mode(std::uint8_t noc_mode);",
+    "params": [
+      {
+        "name": "noc_mode",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DataMovementKernelConfigHandle::set_noc_mode",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:336"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle::add_compile_arg",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 56,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_compile_arg(std::uint32_t arg);",
+    "params": [
+      {
+        "name": "arg",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DataMovementKernelConfigHandle::add_compile_arg",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:337"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle::add_define",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 57,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_define(rust::Str key, rust::Str value);",
+    "params": [
+      {
+        "name": "key",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "value",
+        "type": "rust::Str",
+        "category": "str"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DataMovementKernelConfigHandle::add_define",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:338"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle::add_named_compile_arg",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 58,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_named_compile_arg(rust::Str key, std::uint32_t value);",
+    "params": [
+      {
+        "name": "key",
+        "type": "rust::Str",
+        "category": "str"
+      },
+      {
+        "name": "value",
+        "type": "std::uint32_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DataMovementKernelConfigHandle::add_named_compile_arg",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:339"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle::set_opt_level",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 59,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void set_opt_level(std::uint8_t opt_level);",
+    "params": [
+      {
+        "name": "opt_level",
+        "type": "std::uint8_t",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::DataMovementKernelConfigHandle::set_opt_level",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:344"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::close",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 32,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "bool close();",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::close",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:346"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::is_open",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 33,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool is_open() const noexcept;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": true,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::is_open",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:347"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::device_id",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 34,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::int32_t device_id() const noexcept;",
+    "params": [],
+    "return": {
+      "type": "std::int32_t",
+      "category": "value"
+    },
+    "noexcept": true,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::device_id",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:348"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::num_devices",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 35,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::size_t num_devices() const;",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::num_devices",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:349"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::num_rows",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 36,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::size_t num_rows() const;",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::num_rows",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:350"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::num_cols",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 37,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::size_t num_cols() const;",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::num_cols",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:351"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::compute_with_storage_grid_size_x",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 38,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::uint32_t compute_with_storage_grid_size_x() const;",
+    "params": [],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::compute_with_storage_grid_size_x",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:352"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::compute_with_storage_grid_size_y",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 39,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::uint32_t compute_with_storage_grid_size_y() const;",
+    "params": [],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::compute_with_storage_grid_size_y",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:353"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::enable_program_cache",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 40,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "void enable_program_cache() const;",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::enable_program_cache",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:354"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::clear_program_cache",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 41,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "void clear_program_cache() const;",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::clear_program_cache",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:355"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::disable_and_clear_program_cache",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 42,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "void disable_and_clear_program_cache() const;",
+    "params": [],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::disable_and_clear_program_cache",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:356"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::num_program_cache_entries",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 43,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::size_t num_program_cache_entries() const;",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::num_program_cache_entries",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:357"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::enqueue_workload",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 44,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "void enqueue_workload(MeshWorkloadHandle& workload, bool blocking) const;",
+    "params": [
+      {
+        "name": "workload",
+        "type": "MeshWorkloadHandle&",
+        "category": "mut_lref"
+      },
+      {
+        "name": "blocking",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::enqueue_workload",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:358"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::write_mesh_buffer",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 46,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "void write_mesh_buffer(const MeshBufferHandle& buffer, rust::Slice<const std::uint8_t> data, bool blocking) const;",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const MeshBufferHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "data",
+        "type": "rust::Slice<const std::uint8_t>",
+        "category": "span"
+      },
+      {
+        "name": "blocking",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::write_mesh_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:396"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle::read_mesh_buffer",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 47,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "void read_mesh_buffer(const MeshBufferHandle& buffer, rust::Slice<std::uint8_t> data, bool blocking) const;",
+    "params": [
+      {
+        "name": "buffer",
+        "type": "const MeshBufferHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "data",
+        "type": "rust::Slice<std::uint8_t>",
+        "category": "span"
+      },
+      {
+        "name": "blocking",
+        "type": "bool",
+        "category": "value"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshDeviceHandle::read_mesh_buffer",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:402"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshWorkloadHandle::add_program_to_full_mesh",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 72,
+    "kind": "member",
+    "receiver": "&",
+    "signature": "void add_program_to_full_mesh(const MeshDeviceHandle& mesh_device, std::unique_ptr<ProgramHandle> program);",
+    "params": [
+      {
+        "name": "mesh_device",
+        "type": "const MeshDeviceHandle&",
+        "category": "const_lref"
+      },
+      {
+        "name": "program",
+        "type": "std::unique_ptr<ProgramHandle>",
+        "category": "unique_ptr"
+      }
+    ],
+    "return": {
+      "type": "void",
+      "category": "void"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshWorkloadHandle::add_program_to_full_mesh",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:364"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshWorkloadHandle::program_count",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 73,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::size_t program_count() const;",
+    "params": [],
+    "return": {
+      "type": "std::size_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshWorkloadHandle::program_count",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:369"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshBufferHandle::address",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/mesh_buffer.hpp",
+    "line": 26,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::uint32_t address() const;",
+    "params": [],
+    "return": {
+      "type": "std::uint32_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshBufferHandle::address",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:391"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshBufferHandle::size",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/mesh_buffer.hpp",
+    "line": 27,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "std::uint64_t size() const;",
+    "params": [],
+    "return": {
+      "type": "std::uint64_t",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshBufferHandle::size",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:392"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshBufferHandle::is_allocated",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/mesh_buffer.hpp",
+    "line": 28,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "bool is_allocated() const;",
+    "params": [],
+    "return": {
+      "type": "bool",
+      "category": "value"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshBufferHandle::is_allocated",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:393"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshBufferHandle::compute_compile_args",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/mesh_buffer.hpp",
+    "line": 29,
+    "kind": "member",
+    "receiver": "const&",
+    "signature": "rust::Vec<std::uint32_t> compute_compile_args() const;",
+    "params": [],
+    "return": {
+      "type": "rust::Vec<std::uint32_t>",
+      "category": "vec"
+    },
+    "noexcept": false,
+    "overload_group": "tt_metal_cxx::MeshBufferHandle::compute_compile_args",
+    "template": false,
+    "deprecated": false,
+    "used_by": [
+      "src/ffi.rs:394"
+    ]
+  }
+]

@@ -1,0 +1,1959 @@
+[
+  {
+    "qualified_name": "tt::tt_metal::IDevice",
+    "header": "tt_metal/api/tt-metalium/device.hpp",
+    "line": 63,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/device.cc:40",
+      "src/tt_metal_cxx/device.cc:78"
+    ]
+  },
+  {
+    "qualified_name": "tt::ChipId",
+    "header": "tt_metal/api/tt-metalium/device_types.hpp",
+    "line": 11,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/device.cc:98"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DispatchCoreConfig",
+    "header": "tt_metal/api/tt-metalium/dispatch_core_common.hpp",
+    "line": 18,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 12,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/device.cc:98"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Program",
+    "header": "tt_metal/api/tt-metalium/program.hpp",
+    "line": 25,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:54",
+      "src/tt_metal_cxx/program.cc:251"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CoreCoord",
+    "header": "tt_metal/api/tt-metalium/core_coord.hpp",
+    "line": 32,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:18",
+      "src/tt_metal_cxx/program.cc:27"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CoreRange",
+    "header": "tt_metal/api/tt-metalium/core_coord.hpp",
+    "line": 38,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 32,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:22",
+      "src/tt_metal_cxx/program.cc:136"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CoreRangeSet",
+    "header": "tt_metal/api/tt-metalium/core_coord.hpp",
+    "line": 111,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 24,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:33",
+      "src/tt_metal_cxx/program.cc:152"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DataMovementConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 64,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 168,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:189"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ComputeConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 105,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 200,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:97"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::KernelHandle",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 51,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:97",
+      "src/tt_metal_cxx/program.cc:114"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ProgramId",
+    "header": "tt_metal/api/tt-metalium/program.hpp",
+    "line": 23,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/program.cc:70",
+      "src/tt_metal_cxx/program.cc:74"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ReaderDataMovementConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 87,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 168,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:153"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::WriterDataMovementConfig",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 96,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 168,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:157"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::MathFidelity",
+    "header": "tt_metal/api/tt-metalium/base_types.hpp",
+    "line": 12,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 1,
+      "align": 1,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:20"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::UnpackToDestMode",
+    "header": "tt_metal/api/tt-metalium/base_types.hpp",
+    "line": 39,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 1,
+      "align": 1,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:37"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::KernelBuildOptLevel",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 54,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 1,
+      "align": 1,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:68"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DataMovementProcessor",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 22,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:89"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::NOC",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 33,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 1,
+      "align": 1,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:103"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::NOC_MODE",
+    "header": "tt_metal/api/tt-metalium/kernel_types.hpp",
+    "line": 40,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 1,
+      "align": 1,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/kernel.cc:113"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::RuntimeArgsData",
+    "header": "tt_metal/api/tt-metalium/runtime_args_data.hpp",
+    "line": 21,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/runtime_args.cc:23"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Buffer",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 158,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 24,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:29",
+      "src/tt_metal_cxx/buffer.cc:119"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::BufferConfig",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 95,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 32,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:322"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::InterleavedBufferConfig",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 102,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 32,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:157",
+      "src/tt_metal_cxx/buffer.cc:322"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardedBufferConfig",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 107,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 88,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:172",
+      "src/tt_metal_cxx/buffer.cc:342"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardSpec",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 38,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 40,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:144"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardSpecBuffer",
+    "header": "tt_metal/api/tt-metalium/buffer.hpp",
+    "line": 68,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 56,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:142",
+      "src/tt_metal_cxx/buffer.cc:233"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::BufferType",
+    "header": "tt_metal/api/tt-metalium/buffer_types.hpp",
+    "line": 37,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:42"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorMemoryLayout",
+    "header": "tt_metal/api/tt-metalium/buffer_types.hpp",
+    "line": 11,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:53"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::ShardOrientation",
+    "header": "tt_metal/api/tt-metalium/buffer_types.hpp",
+    "line": 21,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:64"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::SubDeviceId",
+    "header": "tt_metal/api/tt-metalium/sub_device_types.hpp",
+    "line": 13,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 1,
+      "align": 1,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:152"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DeviceAddr",
+    "header": "tt_metal/api/tt-metalium/hal_types.hpp",
+    "line": 11,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:163"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CBHandle",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 33,
+    "kind": "alias",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:377"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Tile",
+    "header": "tt_metal/api/tt-metalium/tile.hpp",
+    "line": 23,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 40,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:100",
+      "src/tt_metal_cxx/buffer.cc:191"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 35,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 4432,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:186",
+      "src/tt_metal_cxx/buffer.cc:269"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::CircularBufferConfig::Builder",
+    "header": "tt_metal/api/tt-metalium/circular_buffer_config.hpp",
+    "line": 112,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/buffer.cc:186"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::ReplicatedBufferConfig",
+    "header": "tt_metal/api/tt-metalium/mesh_buffer.hpp",
+    "line": 41,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:53"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::DeviceLocalBufferConfig",
+    "header": "tt_metal/api/tt-metalium/mesh_buffer.hpp",
+    "line": 24,
+    "kind": "struct",
+    "traits": {
+      "complete": 1,
+      "size": 32,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:57"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshBuffer",
+    "header": "tt_metal/api/tt-metalium/mesh_buffer.hpp",
+    "line": 92,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 544,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:34",
+      "src/tt_metal_cxx/mesh_buffer.cc:65"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorAccessorArgs",
+    "header": "tt_metal/api/tt-metalium/tensor_accessor_args.hpp",
+    "line": 18,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:97"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshDevice",
+    "header": "tt_metal/api/tt-metalium/mesh_device.hpp",
+    "line": 74,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 32,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/mesh_buffer.cc:66"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshWorkload",
+    "header": "tt_metal/api/tt-metalium/mesh_workload.hpp",
+    "line": 20,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:33",
+      "src/tt_metal_cxx/distributed.cc:141"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshCommandQueue",
+    "header": "tt_metal/api/tt-metalium/mesh_command_queue.hpp",
+    "line": 58,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 24,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:140",
+      "src/tt_metal_cxx/distributed.cc:201"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshShape",
+    "header": "tt_metal/api/tt-metalium/mesh_coord.hpp",
+    "line": 21,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 136,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:157"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::distributed::MeshCoordinateRange",
+    "header": "tt_metal/api/tt-metalium/mesh_coord.hpp",
+    "line": 122,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 240,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/distributed.cc:156",
+      "src/tt_metal_cxx/distributed.cc:157"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::DataType",
+    "header": "tt_metal/api/tt-metalium/tensor/tensor_types.hpp",
+    "line": 26,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:66"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorSpec",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/tensor_spec.hpp",
+    "line": 19,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 152,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:78",
+      "src/tt_metal_cxx/tilize.cc:163"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorLayout",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/layout/tensor_layout.hpp",
+    "line": 32,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:81"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::PageConfig",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/layout/page_config.hpp",
+    "line": 29,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 44,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:83"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::MemoryConfig",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/layout/memory_config/memory_config.hpp",
+    "line": 28,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:84"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Layout",
+    "header": "tt_metal/api/tt-metalium/tensor/spec/layout/layout.hpp",
+    "line": 11,
+    "kind": "enum",
+    "traits": {
+      "complete": 1,
+      "size": 4,
+      "align": 4,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:83"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::Shape",
+    "header": "tt_metal/api/tt-metalium/shape.hpp",
+    "line": 21,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 56,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:80"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::HostTensor",
+    "header": "tt_metal/api/tt-metalium/tensor/host_tensor.hpp",
+    "line": 40,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:148",
+      "src/tt_metal_cxx/tilize.cc:170"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::HostBuffer",
+    "header": "tt_metal/api/tt-metalium/host_buffer.hpp",
+    "line": 29,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 48,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:149",
+      "src/tt_metal_cxx/tilize.cc:169"
+    ]
+  },
+  {
+    "qualified_name": "tt::tt_metal::TensorTopology",
+    "header": "tt_metal/api/tt-metalium/experimental/distributed_tensor/topology/tensor_topology.hpp",
+    "line": 12,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 240,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:170"
+    ]
+  },
+  {
+    "qualified_name": "bfloat16",
+    "header": "tt_metal/api/tt-metalium/bfloat16.hpp",
+    "line": 17,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 2,
+      "align": 2,
+      "trivially_copyable": 1,
+      "move_constructible": 1,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 1,
+      "nothrow_trivially_copyable": 1,
+      "nothrow_move_constructible": 1,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 1,
+      "nothrow_copy_constructible": 1,
+      "copy_assignable": 1,
+      "move_assignable": 1,
+      "nothrow_copy_assignable": 1,
+      "nothrow_move_assignable": 1,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/tt_metal_cxx/tilize.cc:103",
+      "src/tt_metal_cxx/tilize.cc:124"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DeviceHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/device.hpp",
+    "line": 17,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/ffi.rs:85"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 29,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/ffi.rs:86"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferConfigHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/buffer.hpp",
+    "line": 53,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 24,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/ffi.rs:87"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ProgramHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/program.hpp",
+    "line": 29,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 32,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/ffi.rs:88"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ComputeKernelConfigHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 15,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/ffi.rs:89"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::DataMovementKernelConfigHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/kernel.hpp",
+    "line": 42,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 8,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/ffi.rs:90"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshBufferHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/mesh_buffer.hpp",
+    "line": 17,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/ffi.rs:91"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshDeviceHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 21,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 24,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 0,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 1
+    },
+    "used_by": [
+      "src/ffi.rs:92"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::MeshWorkloadHandle",
+    "header": "libtt-metal-cxx/include/tt_metal_cxx/distributed.hpp",
+    "line": 62,
+    "kind": "class",
+    "traits": {
+      "complete": 1,
+      "size": 16,
+      "align": 8,
+      "trivially_copyable": 0,
+      "move_constructible": 0,
+      "destructible": 1,
+      "default_constructible": 1,
+      "copy_constructible": 0,
+      "nothrow_trivially_copyable": 0,
+      "nothrow_move_constructible": 0,
+      "nothrow_destructible": 1,
+      "nothrow_default_constructible": 0,
+      "nothrow_copy_constructible": 0,
+      "copy_assignable": 0,
+      "move_assignable": 0,
+      "nothrow_copy_assignable": 0,
+      "nothrow_move_assignable": 0,
+      "standard_layout": 0
+    },
+    "used_by": [
+      "src/ffi.rs:93"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CoreRangeRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 4,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:4"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::InterleavedBufferConfigRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 11,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:11"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ShardedBufferConfigRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 17,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:17"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferCreateOptionsRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 31,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:31"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::BufferInfoRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 38,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:38"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::ShardSpecBufferMetadataRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 49,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:49"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferMetadataRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 59,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:59"
+    ]
+  },
+  {
+    "qualified_name": "tt_metal_cxx::CircularBufferIndexConfigRepr",
+    "header": "libtt-metal-cxx/src/ffi.rs",
+    "line": 69,
+    "kind": "struct",
+    "traits": "rust-side cxx struct (not a C++ type; fields are POD scalars)",
+    "used_by": [
+      "src/ffi.rs:69"
+    ]
+  }
+]
