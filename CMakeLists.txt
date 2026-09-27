@@ -82,6 +82,16 @@ else()
 endif()
 
 include(project_options)
+
+# Perf user-callchain sampling treats the frame-pointer register as a stack address.
+# In optimized MMIO code, repurposing it as a BAR pointer can cause unintended device reads.
+# Set these before adding any host dependencies, including UMD, not just Tracy's consumers.
+if(ENABLE_TRACY)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-fno-omit-frame-pointer>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-mno-omit-leaf-frame-pointer>"
+    )
+endif()
 include(unity)
 include(clang-tidy)
 

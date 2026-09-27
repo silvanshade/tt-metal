@@ -32,6 +32,8 @@ Tracy profiling support is **enabled by default** when building Metalium. Simply
     ninja
     ninja install
 
+With ``ENABLE_TRACY=ON``, all host C and C++ targets built in the tree, including UMD and third-party dependencies, retain frame pointers in every build configuration. Both ``-fno-omit-frame-pointer`` and ``-mno-omit-leaf-frame-pointer`` are required: Linux perf user-callchain sampling follows the frame-pointer register, which optimized MMIO code must not repurpose as a PCIe BAR pointer. These flags do not change device-kernel compilation or rebuild precompiled system libraries.
+
 Debug-verbosity zones are off by default and gated behind opt-in *categories*.
 Build with one or more (comma-separated), or ``all`` for every zone; see
 ``./build_metal.sh --help`` for the list:
