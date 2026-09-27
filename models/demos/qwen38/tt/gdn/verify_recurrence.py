@@ -105,7 +105,7 @@ def verify_recurrence(q, k, v, g, beta, state, snapshots):
                 compile_time_args=[columns],
                 common_runtime_args=[rows],
                 config=ttnn.ComputeConfigDescriptor(
-                    math_fidelity=ttnn.MathFidelity.HiFi2, fp32_dest_acc_en=True, math_approx_mode=False
+                    math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
                 ),
             ),
         ],
