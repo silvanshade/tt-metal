@@ -14,6 +14,7 @@ import torch
 import ttnn
 from models.common.hadamard import HadamardRotation
 from models.demos.qwen38.tt import tp_common as tpc
+from models.demos.qwen38.tt.attention.kv_block import write_kv_block
 from models.demos.qwen38.tt.attention.rope_tp import apply_partial_rope_prefill
 from models.tt_transformers.tt.ccl import tt_all_reduce
 
@@ -524,8 +525,9 @@ class TPAttention:
 
         requires: bound paged cache; 1..32 consecutive positions; page-table rows
             name the same sequence; caller owns logical committed length.
-        ensures: projections run across token rows together; KV writes serialize
-            to prevent quantized-tile races. Batched attention applies each row's
+        ensures: projections run across token rows together; one program writes every
+            row's K and V, each cache tile by a single owning core, so rows sharing a
+            quantized tile never race. Batched attention applies each row's
             causal position in one SDPA.
             Rejection trims logical length: next query position masks stale suffix,
             and subsequent token writes replace it before attention can read it.
@@ -599,35 +601,29 @@ class TPAttention:
         if use_paged:
             # External paged KV: update at cur_pos, then paged SDPA-decode
             keys, values = self.paged_k, self.paged_v
-            v_p = ttnn.pad(v, [1, B, 32, HD], [0, 0, 0, 0], 0.0, memory_config=_L1)
-            # Tile-aligned padding can alias its input. Keep the source allocations
-            # alive until every cache update has consumed the padded tensors.
-            # Only multiple shared-sequence rows need serialization. For one row,
-            # full-range slices alias caller-owned position/page tensors; use the
-            # ordinary single update without slicing or freeing those aliases.
             if shared_sequence and B > 1:
+                # One program writes every row: the packer casts the rows to the cache dtype and
+                # each cache tile the block touches has a single owning core, so rows sharing a
+                # tile never race.
                 assert page_table is not None
-                for index in range(B):
-                    position = ttnn.slice(cur_pos_tt, (index,), (index + 1,))
-                    pages = ttnn.slice(page_table, (index, 0), (index + 1, page_table.shape[-1]))
-                    for cache, projected in ((keys, k), (values, v_p)):
-                        row = ttnn.slice(projected, (0, index, 0, 0), (1, index + 1, projected.shape[2], HD))
-                        sharded = ttnn.to_memory_config(row, self._kv_shard_cfg(1))
-                        ttnn.deallocate(row)
-                        ttnn.experimental.paged_update_cache(
-                            cache, sharded, update_idxs_tensor=position, page_table=pages
-                        )
-                        ttnn.deallocate(sharded)
-                    ttnn.deallocate(position)
-                    ttnn.deallocate(pages)
+                cast = k.dtype != keys.dtype
+                k_c = ttnn.typecast(k, keys.dtype, memory_config=_L1) if cast else k
+                v_c = ttnn.typecast(v, values.dtype, memory_config=_L1) if cast else v
+                write_kv_block(k_c, v_c, keys, values, cur_pos_tt, page_table)
+                if cast:
+                    ttnn.deallocate(k_c)
+                    ttnn.deallocate(v_c)
             else:
+                v_p = ttnn.pad(v, [1, B, 32, HD], [0, 0, 0, 0], 0.0, memory_config=_L1)
+                # Tile-aligned padding can alias its input. Keep the source allocations
+                # alive until every cache update has consumed the padded tensors.
                 _kv_cfg = self._kv_shard_cfg(B)
                 v_sh = ttnn.to_memory_config(v_p, _kv_cfg)
                 # Update accepts BF16 and casts to the bound cache dtype.
                 ttnn.experimental.paged_update_cache(keys, k, update_idxs_tensor=cur_pos_tt, page_table=page_table)
                 ttnn.experimental.paged_update_cache(values, v_sh, update_idxs_tensor=cur_pos_tt, page_table=page_table)
                 ttnn.deallocate(v_sh)
-            ttnn.deallocate(v_p)
+                ttnn.deallocate(v_p)
             ttnn.deallocate(k)
             ttnn.deallocate(v)
 
