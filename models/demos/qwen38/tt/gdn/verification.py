@@ -1,57 +1,61 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-"""Single-user GDN verification with compact finite-precision state replay."""
+"""Single-user GDN verification with per-row state snapshots and constant-cost prefix folds."""
 
 import torch
 
 import ttnn
 from models.demos.qwen38.tt.gdn.tp import TPGatedDeltaNet
-from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_ops import fused_decay_and_write_ttnn
+from models.demos.qwen38.tt.gdn.verify_recurrence import select_rows, select_state
 
 
 class GDNVerification:
-    """Own persistent scratch and state-write tape, allocated before trace capture.
+    """Own the checkpoint, per-row state snapshots and tap history, allocated before trace capture.
 
-    requires: layer has stable batched state; no concurrent use of layer while bound.
-    ensures: verification leaves committed state unchanged; fold commits only accepted
+    requires: layer has stable batched recurrent state and four BF16 convolution taps; no
+        concurrent use of layer while bound.
+    ensures: verification leaves committed state unchanged; fold commits only the accepted
         prefix, preserving other slots and committed buffer addresses.
     hypothesis: L2 sequential decode continuation at every prefix, including zero and
         full acceptance; nonzero checkpoint and distinct neighboring live slots.
     """
 
     def __init__(self, layer: TPGatedDeltaNet, max_tokens: int) -> None:
-        """Allocate checkpoint, scratch, convolution inputs and rank-one update tape."""
-        assert 1 <= max_tokens <= 32
+        """Allocate checkpoint, snapshots and one tap history per verification width."""
+        assert 1 <= max_tokens and layer.K + max_tokens <= 32
         assert layer._stable_state and layer.rec_state is not None and layer.conv_states is not None
+        assert layer.K == 4
         self.layer = layer
         self.max_tokens = max_tokens
         self.slot = -1
         self.count = 0
-        rec_shape = (1, layer.Nv, layer.Dk, layer.Dv)
-        conv_shape = (1, 1, layer.qkv_dim_tp)
-        self.checkpoint = self._allocate(rec_shape, ttnn.float32)
-        self.scratch = self._allocate(rec_shape, ttnn.float32)
-        self.checkpoint_convs = [self._allocate(conv_shape, ttnn.bfloat16) for _ in range(layer.K)]
-        self.scratch_convs = [self._allocate(conv_shape, ttnn.bfloat16) for _ in range(layer.K)]
-        self.conv_inputs = [self._allocate(conv_shape, ttnn.bfloat16) for _ in range(max_tokens)]
-        shapes = ((1, layer.Nv, layer.Dk), (1, layer.Nv, layer.Dv), (1, layer.Nv, 1, 1), (1, layer.Nv))
-        self.updates = [tuple(self._allocate(shape, ttnn.float32) for shape in shapes) for _ in range(max_tokens)]
+        self.checkpoint = self._allocate((1, layer.Nv, layer.Dk, layer.Dv), ttnn.float32)
+        self.checkpoint_convs = [self._allocate((1, 1, layer.qkv_dim_tp), ttnn.bfloat16) for _ in range(layer.K)]
+        self.snapshots = self._allocate((max_tokens, layer.Nv, layer.Dk, layer.Dv), ttnn.float32)
+        self.histories = {
+            count: self._allocate((1, layer.K + count, layer.qkv_dim_tp), ttnn.bfloat16)
+            for count in range(1, max_tokens + 1)
+        }
+        # BF16 committed state (QWEN35_GDN_STATE_BF16=1) folds through an FP32 staging row.
+        self.staging = (
+            None
+            if layer.rec_state.dtype == ttnn.float32
+            else self._allocate((1, layer.Nv, layer.Dk, layer.Dv), ttnn.float32)
+        )
         self._released = False
 
     def release(self) -> None:
-        """Discard scratch and tapes without committing pending speculative state.
+        """Discard checkpoint, snapshots and histories without committing pending state.
 
         requires: no live trace references these buffers; no concurrent verification.
         ensures: committed layer state survives; repeated release is harmless.
         """
         if self._released:
             return
-        for tensor in (self.checkpoint, self.scratch):
+        staging = () if self.staging is None else (self.staging,)
+        for tensor in (self.checkpoint, self.snapshots, *self.checkpoint_convs, *self.histories.values(), *staging):
             ttnn.deallocate(tensor)
-        for tensors in (self.checkpoint_convs, self.scratch_convs, self.conv_inputs, *self.updates):
-            for tensor in tensors:
-                ttnn.deallocate(tensor)
         self._released = True
         self.count = 0
         self.slot = -1
@@ -91,7 +95,7 @@ class GDNVerification:
         """Checkpoint one slot outside the slot-independent verification trace.
 
         requires: no pending verification; stable committed state and valid slot.
-        ensures: scratch starts at the selected checkpoint; committed state unchanged.
+        ensures: the checkpoint holds the selected slot; committed state unchanged.
         """
         layer = self.layer
         assert not self._released
@@ -99,92 +103,45 @@ class GDNVerification:
         assert layer.rec_state is not None and layer.conv_states is not None and layer._stable_state
         self.slot = slot
         self._checkpoint_row(layer.rec_state, self.checkpoint, 0, slot)
-        ttnn.copy(self.checkpoint, self.scratch)
-        for source, checkpoint, scratch in zip(
-            layer.conv_states, self.checkpoint_convs, self.scratch_convs, strict=True
-        ):
+        for source, checkpoint in zip(layer.conv_states, self.checkpoint_convs, strict=True):
             self._checkpoint_row(source, checkpoint, 1, slot)
-            ttnn.copy(checkpoint, scratch)
 
     def verify_prepared(self, x: ttnn.Tensor) -> ttnn.Tensor:
-        """Execute against prepared scratch; record writes without committing.
+        """Execute against the prepared checkpoint; record snapshots without committing.
 
         requires: prepare selected the checkpoint; 1..max_tokens consecutive rows.
         ensures: device commands contain no committed-slot selection.
         """
         layer = self.layer
-        assert self.count == 0 and self.slot >= 0 and 1 <= x.shape[-2] <= self.max_tokens
+        count = x.shape[-2]
+        assert self.count == 0 and self.slot >= 0 and 1 <= count <= self.max_tokens
         saved = layer.B, layer.rec_state, layer.conv_states, layer._stable_state
-        layer.B, layer.rec_state, layer.conv_states, layer._stable_state = 1, self.scratch, self.scratch_convs, True
+        layer.B, layer.rec_state, layer.conv_states, layer._stable_state = 1, self.checkpoint, self.checkpoint_convs, True
         try:
-            output = layer.forward_verify(x, self.updates, self.conv_inputs)
+            output = layer.forward_verify(x, self.snapshots, self.histories[count])
         finally:
             layer.B, layer.rec_state, layer.conv_states, layer._stable_state = saved
-        self.count = x.shape[-2]
+        self.count = count
         return output
 
     def fold(self, accepted: int | ttnn.Tensor) -> None:
-        """Commit accepted verifier inputs from the FP32 update tape.
+        """Commit the state after the accepted verifier inputs into the selected slot.
 
         requires: pending verification; accepted is an integer or device FP32 tiled
             scalar in [0, count]; committed state has not advanced since verification.
         ensures: only accepted inputs change state; rejected writes never contribute.
-            Device acceptance stays on device, including convolution-prefix selection.
-        intension: retain one recurrent accumulator, not a state snapshot per token;
-            a host-known full prefix reuses verified scratch without recurrence replay.
+            Device acceptance stays on device; cost is independent of the accepted count.
         """
-        dynamic = isinstance(accepted, ttnn.Tensor)
         assert self.count > 0
-        if not dynamic:
+        if not isinstance(accepted, ttnn.Tensor):
             assert 0 <= accepted <= self.count
-        count = self.count if dynamic else accepted
-        full = not dynamic and accepted == self.count
-        self.count = 0
-        if count == 0:
+        count, self.count = self.count, 0
+        if isinstance(accepted, int) and accepted == 0:
             return
         layer = self.layer
-        h = ttnn.clone(self.scratch if full else self.checkpoint, memory_config=ttnn.L1_MEMORY_CONFIG)
-        updates = () if full else self.updates[:count]
-        for index, (k, delta, g, beta) in enumerate(updates):
-            previous = h
-            operand = h if h.dtype == k.dtype else ttnn.typecast(h, k.dtype)
-            decayed = ttnn.multiply(
-                operand,
-                g,
-                input_tensor_b_activations=[ttnn.UnaryOpType.EXP],
-                memory_config=ttnn.L1_MEMORY_CONFIG,
-            )
-            if operand is not previous:
-                ttnn.deallocate(operand)
-            updated = fused_decay_and_write_ttnn(decayed, k, delta, g, beta, device=layer.mesh, apply_decay=False)
-            ttnn.deallocate(decayed)
-            if updated.dtype != self.checkpoint.dtype:
-                converted = ttnn.typecast(updated, self.checkpoint.dtype)
-                ttnn.deallocate(updated)
-                updated = converted
-            if dynamic:
-                active = ttnn.typecast(ttnn.gt(accepted, index), previous.dtype)
-                h = ttnn.where(active, updated, previous, memory_config=ttnn.L1_MEMORY_CONFIG)
-                ttnn.deallocate(active)
-                ttnn.deallocate(updated)
-            else:
-                h = updated
-            ttnn.deallocate(previous)
-        convs = []
-        for tap in range(layer.K):
-            if dynamic:
-                selected = ttnn.clone(self.checkpoint_convs[tap])
-                for prefix in range(1, count + 1):
-                    offset = tap + prefix
-                    source = self.checkpoint_convs[offset] if offset < layer.K else self.conv_inputs[offset - layer.K]
-                    active = ttnn.reshape(ttnn.typecast(ttnn.eq(accepted, prefix), source.dtype), (1, 1, 1))
-                    updated = ttnn.where(active, source, selected)
-                    ttnn.deallocate(active)
-                    ttnn.deallocate(selected)
-                    selected = updated
-            else:
-                offset = tap + accepted
-                source = self.checkpoint_convs[offset] if offset < layer.K else self.conv_inputs[offset - layer.K]
-                selected = ttnn.clone(source, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-            convs.append(selected)
-        layer.write_slot(self.slot, h, convs)
+        if self.staging is None:
+            select_state(self.snapshots, self.checkpoint, accepted, layer.rec_state, self.slot)
+        else:
+            select_state(self.snapshots, self.checkpoint, accepted, self.staging, 0)
+            layer._write_index(layer.rec_state, ttnn.typecast(self.staging, layer.rec_state.dtype), self.slot, dim=0)
+        select_rows(self.histories[count], accepted, layer.conv_states, self.slot)

@@ -1175,40 +1175,40 @@ class TPGatedDeltaNet:
         qkv, z, a, b = self._project_qkvzab(x, x.shape[-2], out_mc=ttnn.L1_MEMORY_CONFIG)
         return self._project_decode_output(self._decode_gated(qkv, z, a, b))
 
-    def forward_verify(
-        self,
-        x: ttnn.Tensor,
-        updates: list[tuple[ttnn.Tensor, ...]],
-        conv_inputs: list[ttnn.Tensor],
-    ) -> ttnn.Tensor:
-        """Verify consecutive tokens against bound single-user scratch state.
+    def forward_verify(self, x: ttnn.Tensor, snapshots: ttnn.Tensor, history: ttnn.Tensor) -> ttnn.Tensor:
+        """Verify consecutive tokens against bound single-user checkpoint state.
 
-        requires: B=1; 1 <= token count <= 32; scratch and tape allocated before capture.
-        ensures: sequential decode recurrence; input/output projections amortized
-            across tokens; tape retains exact finite-precision state-write operands.
+        requires: B=1; 1 <= token count <= 32; snapshots [>=count, Nv, Dk, Dv] and history
+            [1, K + count, qkv_dim_tp] allocated before capture.
+        ensures: sequential decode recurrence; input/output projections amortized across tokens;
+            bound state is read, never written; snapshots and history determine the state after
+            any accepted prefix.
         hypothesis: L2 sequential decode comparison; every accepted-prefix boundary.
         """
         count = x.shape[-2]
         assert self.B == 1 and 1 <= count <= 32
-        assert len(updates) >= count and len(conv_inputs) >= count
         x = ttnn.reshape(x, (1, count, x.shape[-1]))
         projected = self._project_qkvzab(x, count, out_mc=ttnn.L1_MEMORY_CONFIG)
-        gated = self._verify_gated(projected, updates, conv_inputs)
+        gated = self._verify_gated(projected, snapshots, history)
         for tensor in projected:
             ttnn.deallocate(tensor)
         return self._project_decode_output(gated)
 
-    def _verify_gated(self, projected, updates, conv_inputs):
-        """Batch convolution and gates; advance scratch state in one recurrent program."""
+    def _verify_gated(self, projected, snapshots, history):
+        """Batch convolution and gates; advance the checkpoint in one recurrent program."""
         qkv, z, a, b = projected
         count, width = qkv.shape[-2], qkv.shape[-1]
         memory = ttnn.L1_MEMORY_CONFIG
-        # Sequence rows occupy separate tiles, so history windows never split a tile.
+        # Checkpoint taps then this block's inputs, one row each: any accepted prefix's taps.
+        taps = ttnn.concat([*self.conv_states, ttnn.reshape(qkv, (1, count, width))], dim=1, memory_config=memory)
+        ttnn.copy(taps, history)
+        ttnn.deallocate(taps)
+        # Sequence rows occupy separate tiles, so convolution windows never split a tile.
         qkv = ttnn.reshape(qkv, (count, 1, width))
-        history = ttnn.concat([*self.conv_states[1:], qkv], dim=0, memory_config=memory)
+        window_source = ttnn.concat([*self.conv_states[1:], qkv], dim=0, memory_config=memory)
         conv = None
         for tap in range(self.K):
-            window = ttnn.slice(history, (tap, 0, 0), (tap + count, 1, width))
+            window = ttnn.slice(window_source, (tap, 0, 0), (tap + count, 1, width))
             previous = conv
             conv = (
                 ttnn.multiply(window, self.tw["conv_taps"][tap], memory_config=memory)
@@ -1218,16 +1218,7 @@ class TPGatedDeltaNet:
             ttnn.deallocate(window)
             if previous is not None:
                 ttnn.deallocate(previous)
-        for index in range(count):
-            row = ttnn.slice(qkv, (index, 0, 0), (index + 1, 1, width))
-            ttnn.copy(row, conv_inputs[index])
-            ttnn.deallocate(row)
-        for index, destination in enumerate(self.conv_states):
-            start = count - 1 + index
-            row = ttnn.slice(history, (start, 0, 0), (start + 1, 1, width))
-            ttnn.copy(row, destination)
-            ttnn.deallocate(row)
-        ttnn.deallocate(history)
+        ttnn.deallocate(window_source)
         activated = ttnn.silu(conv, memory_config=memory)
         ttnn.deallocate(conv)
         kd, nk, nv = self.key_dim_tp, self.Nk, self.Nv
@@ -1243,23 +1234,8 @@ class TPGatedDeltaNet:
         beta = ttnn.typecast(ttnn.reshape(ttnn.sigmoid(b, memory_config=memory), (count, 1, nv)), ttnn.float32)
         g = ttnn.multiply(self.tw["neg_exp_A"], _softplus_add(a, self.tw["dt_bias"]), memory_config=memory)
         g = ttnn.typecast(ttnn.reshape(g, (count, 1, nv)), ttnn.float32)
-        output, delta, final = verify_recurrence(q, k, v, g, beta, self.rec_state)
-        ttnn.copy(final, self.rec_state)
-        ttnn.deallocate(final)
-        tapes = (
-            ttnn.reshape(k, (count, nv, self.Dk)),
-            ttnn.reshape(delta, (count, nv, self.Dv)),
-            ttnn.reshape(g, (count, nv, 1, 1)),
-            beta,
-        )
-        for index in range(count):
-            for source, destination in zip(tapes, updates[index], strict=True):
-                start, end = [0] * len(source.shape), list(source.shape)
-                start[0], end[0] = index, index + 1
-                row = ttnn.slice(source, start, end)
-                ttnn.copy(ttnn.reshape(row, destination.shape), destination)
-                ttnn.deallocate(row)
-        for tensor in (q, k, v, g, beta, delta):
+        output = verify_recurrence(q, k, v, g, beta, self.rec_state, snapshots)
+        for tensor in (q, k, v, g, beta):
             ttnn.deallocate(tensor)
         normalized = ttnn.rms_norm(
             ttnn.reshape(output, (count, nv, self.Dv)), weight=self.tw["norm_w"], epsilon=1e-6, memory_config=memory

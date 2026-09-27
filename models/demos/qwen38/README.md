@@ -103,9 +103,9 @@ export QWEN_QK_HADAMARD=0
 
 `Qwen38MTPVerifier.verify(...)` checkpoints one request, computes target logits and normalized hidden rows, and leaves a pending prefix fold. `fold(accepted_inputs)` commits only accepted input tokens, including the anchor but excluding the correction or bonus token.
 
-Verification batches target projections across the input block. Each attention layer uses one paged SDPA call with a causal position per row; KV writes remain ordered per row. Each GDN layer batches convolution and gates, then advances the block through one recurrent program with one core per local value head. The compact update tape supports committing any accepted prefix without retaining a recurrent-state snapshot per token.
+Verification batches target projections across the input block. Each attention layer uses one paged SDPA call with a causal position per row; KV writes remain ordered per row. Each GDN layer batches convolution and gates, then advances the block through one recurrent program that splits every local value head across up to four cores by value-column tile. That program writes the recurrent state after every row into a per-layer snapshot buffer, and the layer keeps the checkpoint taps followed by the block's inputs as one tap history. A fold of any accepted prefix — host-known or a device-resident count — selects one snapshot and one four-row tap window into the committed slot, so its cost does not depend on how many inputs were accepted.
 
-GDN verification computes recurrence and prefix replay in FP32, including when ordinary decode uses `QWEN35_GDN_DECODE_BF16=1`. BF16 committed state is converted when checkpointed and restored to its storage dtype when folded; `QWEN35_GDN_STATE_BF16=1` does not change verifier arithmetic. Batched arithmetic can differ numerically from sequential decode.
+GDN verification computes the recurrence and its snapshots in FP32, including when ordinary decode uses `QWEN35_GDN_DECODE_BF16=1`. BF16 committed state is converted when checkpointed and restored to its storage dtype when folded; `QWEN35_GDN_STATE_BF16=1` does not change verifier arithmetic. Batched arithmetic can differ numerically from sequential decode.
 
 For shared trace execution:
 

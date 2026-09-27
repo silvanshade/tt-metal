@@ -84,11 +84,15 @@ void matmul(uint32_t a, uint32_t b, uint32_t out, uint32_t m, uint32_t n, uint32
 }
 }  // namespace
 
+// Each value column of a head's state advances independently, so one core owns a 128 x (32 *
+// columns) block: decay, k.h, delta, rank-one write and q.h touch only that block. Every row's
+// state block leaves through CB 16; the host selects any accepted prefix from those snapshots.
 void kernel_main() {
     const uint32_t rows = get_arg_val<uint32_t>(0);
+    constexpr uint32_t n = get_compile_time_arg_val(0);
     compute_kernel_hw_startup(5, 6);
-    copy(5, 6, 16);
-    cb_pop_front(5, 16);
+    copy(5, 6, 4 * n);
+    cb_pop_front(5, 4 * n);
     for (uint32_t row = 0; row < rows; ++row) {
         cb_wait_front(3, 1);
         cb_reserve_back(15, 1);
@@ -101,14 +105,13 @@ void kernel_main() {
         cb_push_back(15, 1);
         cb_pop_front(3, 1);
 
-        binary<0>(6, 15, 7, 16, true);
-        cb_pop_front(6, 16);
+        binary<0>(6, 15, 7, 4 * n, true);  // decayed state
+        cb_pop_front(6, 4 * n);
         cb_pop_front(15, 1);
-        matmul(1, 7, 8, 1, 4, 4);  // k @ h
-        binary<1>(2, 8, 9, 4);
-        cb_pop_front(2, 4);
-        cb_pop_front(8, 4);
-        copy(9, 17, 4);  // compact repair tape, consumed by writer
+        matmul(1, 7, 8, 1, n, 4);  // k @ h
+        binary<1>(2, 8, 9, n);     // delta = v - k @ h
+        cb_pop_front(2, n);
+        cb_pop_front(8, n);
 
         cb_reserve_back(10, 4);
         reconfig_data_format_srca(1);
@@ -120,19 +123,18 @@ void kernel_main() {
             store(10, t);
         }
         cb_push_back(10, 4);
-        matmul(10, 9, 11, 4, 4, 1);
+        matmul(10, 9, 11, 4, n, 1);  // k^T delta
         cb_pop_front(10, 4);
-        cb_pop_front(9, 4);
-        binary<0>(11, 4, 12, 16, true);
-        cb_pop_front(11, 16);
+        cb_pop_front(9, n);
+        binary<0>(11, 4, 12, 4 * n, true);  // beta k^T delta
+        cb_pop_front(11, 4 * n);
         cb_pop_front(4, 1);
-        binary<2>(7, 12, 6, 16);  // state remains resident between rows
-        cb_pop_front(7, 16);
-        cb_pop_front(12, 16);
-        matmul(0, 6, 14, 1, 4, 4);
+        binary<2>(7, 12, 6, 4 * n);  // state remains resident between rows
+        cb_pop_front(7, 4 * n);
+        cb_pop_front(12, 4 * n);
+        matmul(0, 6, 14, 1, n, 4);  // q @ h
         cb_pop_front(0, 4);
         cb_pop_front(1, 4);
+        copy(6, 16, 4 * n);  // this row's state snapshot
     }
-    copy(6, 16, 16);
-    cb_pop_front(6, 16);
 }
