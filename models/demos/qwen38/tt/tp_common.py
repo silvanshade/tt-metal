@@ -115,29 +115,29 @@ def dram_sharded_readers(n, requested):
     return next(w for w in (requested, 3, 2, 1) if 1 <= w <= 3 and per_bank % w == 0)
 
 
-def create_dram_sharded_matmul_program_config(m, k, n, num_cores=None, num_workers_per_dram_bank=1):
+def create_dram_sharded_matmul_program_config(
+    m, k, n, storage_cores=32, max_in0_block_w=None, num_workers_per_dram_bank=1
+):
     """DRAM-sharded matmul program config (decode, small M).
 
-    `in0_block_w` is the widest legal block: it must divide the per-core activation width in tiles,
-    `k_tiles / num_cores`. Width dominates the measured rate — at `in0_block_w=1` the sharded matmul
-    runs below the interleaved 1D kernel, at the widest legal block it runs 1.4-1.5x above it
-    (tests/test_decode_matmul_layout_sweep.py). A second reader per bank is worth a further ~1.25x;
-    readers must divide the per-bank output width in tiles (`dram_sharded_readers`).
+    The activation is width-sharded over the core count dividing `k` in tiles that is nearest
+    `storage_cores` (`_find_grid`); `create_activation_shard_config(k, storage_cores)` builds the
+    matching layout. `in0_block_w` is the widest block up to `max_in0_block_w` that divides the
+    per-core activation width in tiles, `k_tiles / cores`. Width dominates the measured rate — at
+    `in0_block_w=1` the sharded matmul runs below the interleaved 1D kernel, at 4-17 it runs
+    1.4-1.5x above it (tests/test_decode_matmul_layout_sweep.py). A second reader per bank is worth
+    a further ~1.25x; readers must divide the per-bank output width in tiles (`dram_sharded_readers`).
     """
     m_tiles = math.ceil(m / TILE_SIZE)
     k_tiles = math.ceil(k / TILE_SIZE)
     n_padded = _roundup(n, TILE_SIZE * DRAM_CORES)
     n_tiles = n_padded // TILE_SIZE
 
-    if num_cores is None:
-        rows, cols = _find_grid(k_tiles)
-        num_cores = rows * cols
-
+    rows, cols = _find_grid(k_tiles, storage_cores)
+    num_cores = rows * cols
     k_tiles_per_core = k_tiles // num_cores
-    if k_tiles_per_core == 0:
-        k_tiles_per_core = k_tiles
-        num_cores = 1
-    in0_block_w = _find_largest_divisor(k_tiles_per_core, max_div=k_tiles_per_core)
+    block_cap = min(k_tiles_per_core, max_in0_block_w or k_tiles_per_core)
+    in0_block_w = _find_largest_divisor(k_tiles_per_core, max_div=block_cap)
     per_core_N = n_tiles // num_cores if n_tiles >= num_cores else 1
     workers = dram_sharded_readers(n, num_workers_per_dram_bank)
 
@@ -203,10 +203,11 @@ def matmul_1d_decode(x, weight, decode_1d_progcfg, compute_cfg, out_memory_confi
     return out
 
 
-def create_activation_shard_config(k):
-    """WIDTH_SHARDED L1 activation config for a [*, k] activation."""
+def create_activation_shard_config(k, storage_cores=32):
+    """WIDTH_SHARDED L1 activation config for a [*, k] activation, on the grid
+    `create_dram_sharded_matmul_program_config` picks for the same `k` and `storage_cores`."""
     k_tiles = k // TILE_SIZE
-    rows, cols = _find_grid(k_tiles)
+    rows, cols = _find_grid(k_tiles, storage_cores)
     num_cores = rows * cols
     width_per_core = k // num_cores
     return ttnn.create_sharded_memory_config(
