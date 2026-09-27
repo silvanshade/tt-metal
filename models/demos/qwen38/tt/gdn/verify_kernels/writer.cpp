@@ -6,11 +6,10 @@
 #include "api/tensor/noc_traits.h"
 
 void kernel_main() {
-    constexpr uint32_t head_tiles = get_compile_time_arg_val(0);
-    constexpr uint32_t columns = get_compile_time_arg_val(1);
-    constexpr uint32_t heads = get_compile_time_arg_val(2);
-    constexpr uint32_t grid_x = get_compile_time_arg_val(3);
-    constexpr auto oa = TensorAccessorArgs<4>();
+    constexpr uint32_t columns = get_compile_time_arg_val(0);
+    constexpr uint32_t heads = get_compile_time_arg_val(1);
+    constexpr uint32_t grid_x = get_compile_time_arg_val(2);
+    constexpr auto oa = TensorAccessorArgs<3>();
     constexpr auto sa = TensorAccessorArgs<oa.next_compile_time_args_offset()>();
     const uint32_t core = get_absolute_logical_y() * grid_x + get_absolute_logical_x();
     const uint32_t head = core / (4 / columns);
@@ -19,11 +18,11 @@ void kernel_main() {
     const auto output = TensorAccessor(oa, get_common_arg_val<uint32_t>(1), 4096);
     const auto snapshots = TensorAccessor(sa, get_common_arg_val<uint32_t>(2), 4096);
     Noc noc;
-    const uint32_t offset = (((head % 32) / 16) * 512 + (head % 16) * 16) * 4;
     for (uint32_t row = 0; row < rows; ++row) {
-        // Output: row `row` of each owned column tile lands in this head's row of the output tile.
-        const uint32_t source_offset = ((row / 16) * 512 + (row % 16) * 16) * 4;
-        const uint32_t page = (row * head_tiles + head / 32) * 4 + first;
+        // Output: row `row` of each owned column tile is token `row`'s output in the same row of
+        // that column's tile of the tokens-on-rows [rows, heads * 128] output.
+        const uint32_t row_offset = ((row / 16) * 512 + (row % 16) * 16) * 4;
+        const uint32_t page = head * 4 + first;
         DataflowBuffer out(14);
         out.wait_front(columns);
         DataflowBuffer source(14);
@@ -33,8 +32,8 @@ void kernel_main() {
                     source,
                     output,
                     64,
-                    {.offset_bytes = t * 4096 + source_offset + face * 1024},
-                    {.page_id = page + t, .offset_bytes = offset + face * 1024});
+                    {.offset_bytes = t * 4096 + row_offset + face * 1024},
+                    {.page_id = page + t, .offset_bytes = row_offset + face * 1024});
             }
         }
         // Snapshot: state after this row, [row, head] of [rows, heads, 128, 128].

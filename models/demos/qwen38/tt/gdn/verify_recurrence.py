@@ -9,6 +9,7 @@ each row. Folding an accepted prefix then selects one snapshot and one window of
 so its cost does not depend on how many rows were accepted.
 """
 
+import math
 import struct
 from pathlib import Path
 
@@ -144,7 +145,7 @@ def _bits(value: float) -> int:
 
 
 def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scale: float, eps: float = 1e-6):
-    """Return every row's output; write the state after each row into `snapshots`.
+    """Return every row's output, tokens on rows; write the state after each row into `snapshots`.
 
     requires: FP32 activated [1, T, W] from `verify_conv`, W = (2 * key_heads + H) * 128 holding
         q, k (key heads) then v (value heads); BF16 g and beta blocks [1, T, G], G >= 2H, holding
@@ -152,8 +153,9 @@ def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scal
         of beta; FP32 state [1,H,128,128]; FP32 snapshots [>=T,H,128,128]; value head h reads key
         head h // (H / key_heads); interleaved tiles.
     ensures: q and k are L2-normalized (q times `scale`) per row; each head advances rows in order;
-        `state` is not written; snapshot r holds the state after rows 0..r. No state or token crosses
-        the host boundary. Padding is not part of the result.
+        returns FP32 [1, T, H * 128] in L1, row t holding token t's output with head h at columns
+        h * 128..; `state` is not written; snapshot r holds the state after rows 0..r. No state or
+        token crosses the host boundary. Padding is not part of the result.
     """
     rows, width = activated.shape[-2], activated.shape[-1]
     heads = state.shape[1]
@@ -169,11 +171,11 @@ def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scal
         for t in (activated, state, snapshots)
     )
     output = ttnn.empty(
-        [rows, 1, heads, 128],
+        [1, rows, heads * 128],
         dtype=ttnn.float32,
         layout=ttnn.TILE_LAYOUT,
         device=device,
-        memory_config=ttnn.DRAM_MEMORY_CONFIG,
+        memory_config=ttnn.L1_MEMORY_CONFIG,
     )
     split = _split(device, heads)
     columns = 4 // split
@@ -186,11 +188,10 @@ def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scal
     pages = {0: 4, 1: 4, 2: n, 3: 2, 4: 2, 5: 4 * n, 6: 4 * n, 7: 4 * n, 8: n, 9: n, 10: 4, 11: 4, 12: 4, 13: 4}
     # 18: both BF16 gate blocks, 2 KiB per tile each, in 4 KiB pages.
     pages |= {14: 2 * n, 15: 1, 16: 8 * n, 17: 1, 18: gate_tiles, 19: 1}
-    head_tiles = (heads + 31) // 32
     reader_compile = [heads, columns, grid_x, heads // key_heads, key_heads * 4, gate_tiles]
     for tensor in tensors:
         reader_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
-    writer_compile = [head_tiles, columns, heads, grid_x]
+    writer_compile = [columns, heads, grid_x]
     for tensor in (output, snapshots):
         writer_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
     kernels = Path(__file__).with_name("verify_kernels")
@@ -225,6 +226,63 @@ def verify_recurrence(activated, g, beta, state, snapshots, key_heads: int, scal
     )
     ttnn.generic_op([*tensors, snapshots, output], descriptor)
     return output
+
+
+def verify_gated_norm(output, z, weight, eps: float = 1e-6):
+    """Per-head RMS norm of the verify output, scaled by the norm weight and gated by silu(z).
+
+    requires: FP32 output [1, T, H * 128] from `verify_recurrence`; BF16 z of the same shape;
+        BF16 weight [1, 32, 128] with the norm weight on every row; interleaved tiles.
+    ensures: returns FP32 [1, T, H * 128] in L1 whose head h columns of row t are
+        out / sqrt(mean(out^2) + eps) * weight * silu(z) over that head's 128 columns.
+    """
+    width = output.shape[-1]
+    heads = width // 128
+    assert tuple(z.shape) == tuple(output.shape) and width == heads * 128 and tuple(weight.shape)[-2:] == (32, 128)
+    assert output.dtype == ttnn.float32 and z.dtype == weight.dtype == ttnn.bfloat16
+    assert all(t.layout == ttnn.TILE_LAYOUT and not t.is_sharded() for t in (output, z, weight))
+    device = output.device()
+    gated = ttnn.empty(
+        list(output.shape), dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=device, memory_config=ttnn.L1_MEMORY_CONFIG
+    )
+    cores = _core_set(device, heads)
+    grid_x = device.compute_with_storage_grid_size().x
+    reader_compile = [grid_x]
+    for tensor in (output, z, weight):
+        reader_compile.extend(ttnn.TensorAccessorArgs(tensor).get_compile_time_args())
+    writer_compile = [grid_x, *ttnn.TensorAccessorArgs(gated).get_compile_time_args()]
+    kernels = Path(__file__).with_name("norm_kernels")
+    descriptor = ttnn.ProgramDescriptor(
+        kernels=[
+            ttnn.KernelDescriptor(
+                kernel_source=str(kernels / "reader.cpp"),
+                core_ranges=cores,
+                compile_time_args=reader_compile,
+                common_runtime_args=[t.buffer_address() for t in (output, z, weight)],
+                config=ttnn.ReaderConfigDescriptor(),
+            ),
+            ttnn.KernelDescriptor(
+                kernel_source=str(kernels / "writer.cpp"),
+                core_ranges=cores,
+                compile_time_args=writer_compile,
+                common_runtime_args=[gated.buffer_address()],
+                config=ttnn.WriterConfigDescriptor(),
+            ),
+            ttnn.KernelDescriptor(
+                kernel_source=str(kernels / "compute.cpp"),
+                core_ranges=cores,
+                compile_time_args=[_bits(128 * eps), _bits(math.sqrt(128))],
+                config=ttnn.ComputeConfigDescriptor(
+                    math_fidelity=ttnn.MathFidelity.HiFi4, fp32_dest_acc_en=True, math_approx_mode=False
+                ),
+            ),
+        ],
+        cbs=_cbs(cores, {1: 4, 2: 4}, ttnn.bfloat16, 2048)
+        + _cbs(cores, {0: 4, 3: 1, 4: 4, 5: 1, 6: 4, 7: 4}, ttnn.float32, 4096),
+        semaphores=[],
+    )
+    ttnn.generic_op([output, z, weight, gated], descriptor)
+    return gated
 
 
 def _accepted_args(accepted: int | ttnn.Tensor) -> tuple[int, ttnn.Tensor | None]:

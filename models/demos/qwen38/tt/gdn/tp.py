@@ -13,7 +13,12 @@ import torch
 
 import ttnn
 from models.demos.qwen38.tt import tp_common as tpc
-from models.demos.qwen38.tt.gdn.verify_recurrence import conv_constants, verify_conv, verify_recurrence
+from models.demos.qwen38.tt.gdn.verify_recurrence import (
+    conv_constants,
+    verify_conv,
+    verify_gated_norm,
+    verify_recurrence,
+)
 from models.experimental.gated_attention_gated_deltanet.tt.ttnn_delta_rule_ops import (
     recurrent_gated_delta_rule_decode_ttnn,
 )
@@ -186,6 +191,8 @@ def load_gdn_weights_tp(mesh, sd, args, cache_dir=None):
     tw["dt_bias_ab"] = _gate_row(tw["dt_bias"], mesh, 2 * nv_per)
     tw["neg_exp_A_ab"] = _gate_row(tw["neg_exp_A"], mesh, 2 * nv_per)
     tw["norm_w"] = tpc.replicate(sd[P + "norm.weight"].float(), mesh, c("norm_w"))
+    # The same weight on every row of a [32, Dv] block, for `verify_gated_norm`.
+    tw["norm_w_rows"] = tpc.replicate(sd[P + "norm.weight"].float().expand(32, -1).contiguous(), mesh, c("norm_w_rows"))
     # Conv taps (4), sharded per Q/K/V head grouping
     taps = tpc.prepare_conv_taps(conv1d_w, key_dim, nk, dk, nv, dv, args.gdn_conv_kernel_size, tp)
     tw["conv_taps"] = [tpc.shard_small(taps[j], mesh, c(f"tap{j}")) for j in range(args.gdn_conv_kernel_size)]
@@ -1220,11 +1227,11 @@ class TPGatedDeltaNet:
         return self._project_decode_output(gated)
 
     def _verify_gated(self, projected, snapshots, history):
-        """Convolve the block and write its tap history, then advance the checkpoint in one
-        recurrent program that normalizes q and k itself. The gates run over the whole [a | b]
-        block: head h's decay is column h of g and its beta column Nv + h of beta."""
+        """Convolve the block and write its tap history, advance the checkpoint in one recurrent
+        program that normalizes q and k itself, then norm and gate its output in one more. The
+        gates run over the whole [a | b] block: head h's decay is column h of g and its beta column
+        Nv + h of beta."""
         qkv, z, ab = projected
-        count = qkv.shape[-2]
         memory = ttnn.L1_MEMORY_CONFIG
         activated = verify_conv(qkv, self.conv_states, self.tw["conv_diag"], self.tw["conv_select"], history)
         beta = ttnn.sigmoid(ab, memory_config=memory)
@@ -1232,12 +1239,8 @@ class TPGatedDeltaNet:
         output = verify_recurrence(activated, g, beta, self.rec_state, snapshots, self.Nk, self.scale)
         for tensor in (activated, g, beta):
             ttnn.deallocate(tensor)
-        normalized = ttnn.rms_norm(
-            ttnn.reshape(output, (count, self.Nv, self.Dv)), weight=self.tw["norm_w"], epsilon=1e-6, memory_config=memory
-        )
+        gated = verify_gated_norm(output, z, self.tw["norm_w_rows"])
         ttnn.deallocate(output)
-        gated = _silu_mul(ttnn.reshape(normalized, (1, count, self.value_dim_tp)), z, memory)
-        ttnn.deallocate(normalized)
         return gated
 
     def _decode_gated(
