@@ -133,9 +133,7 @@ class Qwen38DFlashRound:
         drafted = drafter.draft(block_ids, drafter.device_positions(following), drafter.device_mask(following))
         values, indices, projected = drafter.candidates(drafted)
         header = ttnn.add(ttnn.multiply(self.header[0], accepted), ttnn.multiply(self.header[1], correction))
-        egress = ttnn.concat(
-            [header, ttnn.typecast(values, ttnn.float32), ttnn.typecast(indices, ttnn.float32), projected], dim=3
-        )
+        egress = ttnn.concat([header, values, indices, projected], dim=3)
         ttnn.copy(egress, frame["egress"])
         ttnn.copy(following, frame["start"])
 

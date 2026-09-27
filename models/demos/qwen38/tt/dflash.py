@@ -18,6 +18,7 @@ from safetensors import safe_open
 
 import ttnn
 from models.demos.qwen38.tt import tp_common as tpc
+from models.demos.qwen38.tt.greedy import shard_candidates
 from models.tt_transformers.tt.ccl import tt_all_reduce
 from models.tt_transformers.tt.common import Mode
 
@@ -215,10 +216,9 @@ class Qwen38DFlash:
         )
         self.selector_width = self.selector_projection.weight.shape[-1]
         # Candidates come from the target's vocab-sharded LM head without gathering logits: each
-        # device takes the top local_candidates of its shard in one topk (Blackhole routes this
-        # width to its multi-core large-index top-k; slicing into topk-friendly parts measured
-        # slower) and the host merges devices. The global top-k lies within the per-device top-k,
-        # so a tile-wide local_candidates >= top_k keeps the merge exact.
+        # device takes the top_k of its shard (shard_candidates) into a tile-wide local_candidates
+        # segment, and the host merges devices. The global top-k lies within the per-device top-k,
+        # so the merge is exact.
         if self.tp > 1 and not target._lmhead_vocab_sharded:
             raise ValueError("DFlash2 candidates need a vocab-sharded target LM head")
         self.local_vocab = target.lm_head_weight.shape[-1]
@@ -608,11 +608,11 @@ class Qwen38DFlash:
         return out
 
     def candidates(self, hidden: ttnn.Tensor) -> tuple[ttnn.Tensor, ttnn.Tensor, ttnn.Tensor]:
-        """Per block row: per device, the top local_candidates logits and shard-local ids of its
-        vocabulary shard ([1,1,8,C] each; merge() maps them to tokens), and the selector's FP32
-        hidden projection [1,1,8,P] (replicated)."""
+        """Per block row: per device, the top_k logits of its vocabulary shard and their
+        shard-local ids as FP32 [1,1,8,C] (then -inf values; merge() maps them to tokens), and the
+        selector's FP32 hidden projection [1,1,8,P] (replicated)."""
         logits = ttnn.linear(hidden, self.target.lm_head_weight)
-        values, indices = ttnn.topk(logits, k=self.local_candidates, dim=-1)
+        values, indices = shard_candidates(logits, self.top_k, self.local_candidates)
         ttnn.deallocate(logits)
         projected = self._project(hidden, self.selector_projection, precise=True, dtype=ttnn.float32)
         return values, indices, projected

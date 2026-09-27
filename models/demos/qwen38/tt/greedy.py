@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: © 2026 Tenstorrent USA, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Greedy tokens from vocab-sharded LM-head logits without gathering the logits."""
+"""Greedy tokens and top-k candidates from vocab-sharded LM-head logits, without gathering them."""
 
 from pathlib import Path
 
@@ -31,6 +31,15 @@ def _kernel(source: str, cores, compile_args: list, tensors: tuple, config) -> t
     )
 
 
+def _split(logits, mesh) -> tuple[int, int, int, int]:
+    """Column tiles, tiles per core, scan cores and partials (two per core) for a shard."""
+    grid = mesh.compute_with_storage_grid_size()
+    tiles = logits.shape[-1] // 32
+    per = -(-tiles // (grid.x * grid.y))
+    cores = -(-tiles // per)
+    return tiles, per, cores, 2 * cores
+
+
 def greedy_tokens(logits, mesh, tt_ccl, topology) -> ttnn.Tensor:
     """Per row, the vocabulary index of the maximum logit across every device's shard.
 
@@ -45,10 +54,7 @@ def greedy_tokens(logits, mesh, tt_ccl, topology) -> ttnn.Tensor:
     assert logits.dtype == ttnn.bfloat16 and logits.layout == ttnn.TILE_LAYOUT and not logits.is_sharded()
     devices = mesh.get_num_devices()
     grid = mesh.compute_with_storage_grid_size()
-    tiles = width // 32
-    per = -(-tiles // (grid.x * grid.y))
-    cores = -(-tiles // per)
-    count = 2 * cores  # one partial per data-movement core
+    tiles, per, cores, count = _split(logits, mesh)
     tile_rows = -(-count // 32)
 
     # Each core's two data-movement processors scan the lower and upper halves of its tiles.
@@ -99,3 +105,64 @@ def greedy_tokens(logits, mesh, tt_ccl, topology) -> ttnn.Tensor:
     )
     ttnn.deallocate(gathered)
     return tokens
+
+
+def shard_candidates(logits, count: int, width: int = 32) -> tuple[ttnn.Tensor, ttnn.Tensor]:
+    """Per row, the `count` largest logits of each device's vocabulary shard and their columns.
+
+    requires: BF16 tiled interleaved logits [1, 1, T, V / devices] per device; 1 <= T <= 8;
+        1 <= count <= width == 32.
+    ensures: returns FP32 tiled [1, 1, T, width] values and shard-local columns per device (not
+        gathered): row t holds the `count` largest values of row t, ties to the lower column, in
+        no particular order, then -inf values with column 0.
+    """
+    rows = logits.shape[-2]
+    assert 1 <= rows <= 8 and 1 <= count <= width == 32 and logits.shape[-1] % 32 == 0
+    assert logits.dtype == ttnn.bfloat16 and logits.layout == ttnn.TILE_LAYOUT and not logits.is_sharded()
+    mesh = logits.device()
+    grid = mesh.compute_with_storage_grid_size()
+    tiles, per, cores, count_partials = _split(logits, mesh)
+    page = count * 8
+    lists = ttnn.empty(
+        [count_partials * rows, 2 * count], dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=mesh,
+        memory_config=ttnn.L1_MEMORY_CONFIG,
+    )
+    assert lists.buffer_aligned_page_size() == page
+    slices = max(-(-per // 2) * 2 * rows * 32, rows * page)
+    scan = ttnn.num_cores_to_corerangeset(cores, grid, True)
+    tensors = (logits, lists)
+    compile_args = [rows, tiles, per, grid.x]
+    ttnn.generic_op(
+        [*tensors],
+        ttnn.ProgramDescriptor(
+            kernels=[
+                _kernel("top_partial.cpp", scan, [*compile_args, 0, count], tensors, ttnn.ReaderConfigDescriptor()),
+                _kernel("top_partial.cpp", scan, [*compile_args, 1, count], tensors, ttnn.WriterConfigDescriptor()),
+            ],
+            cbs=[_scratch(scan, 0, slices), _scratch(scan, 1, slices)],
+            semaphores=[],
+        ),
+    )
+    values, columns = (
+        ttnn.empty(
+            [1, 1, rows, width], dtype=ttnn.float32, layout=ttnn.TILE_LAYOUT, device=mesh,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+        )
+        for _ in range(2)
+    )
+    reduce = ttnn.num_cores_to_corerangeset(rows, grid, True)
+    tensors = (lists, values, columns)
+    ttnn.generic_op(
+        [*tensors],
+        ttnn.ProgramDescriptor(
+            kernels=[
+                _kernel(
+                    "top_final.cpp", reduce, [rows, count_partials, count, grid.x], tensors, ttnn.ReaderConfigDescriptor()
+                )
+            ],
+            cbs=[_scratch(reduce, 0, count_partials * page + 256)],
+            semaphores=[],
+        ),
+    )
+    ttnn.deallocate(lists)
+    return values, columns
