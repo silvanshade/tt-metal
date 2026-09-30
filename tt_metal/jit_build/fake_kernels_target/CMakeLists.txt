@@ -96,7 +96,7 @@ target_compile_options(
     jit_kernels_index
     PRIVATE
         -O2
-        -std=c++20
+        -std=gnu++26
         -flto=auto
         -ffast-math
         -g
@@ -111,6 +111,11 @@ target_compile_options(
         -Wno-error=unused-but-set-variable
         -Wno-unused-variable
         -Wno-unused-function
+        # The JIT build's C++20 deprecation suppressions, under each compiler's name
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-volatile>
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-deprecated-enum-enum-conversion>
+        $<$<CXX_COMPILER_ID:Clang>:-Wno-deprecated-volatile>
+        $<$<CXX_COMPILER_ID:Clang>:-Wno-enum-enum-conversion>
         -fno-tree-loop-distribute-patterns
         -include
         "${CMAKE_SOURCE_DIR}/tt_metal/jit_build/fake_kernels_target/fake_jit_prelude.h"

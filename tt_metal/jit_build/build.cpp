@@ -244,8 +244,9 @@ void JitBuildEnv::init(
 
     // Flags
     string common_flags =
-        // Use C++17, plus some specific C++20 features we've enabled
-        "-std=c++17 -ftt-nttp -ftt-constinit -ftt-consteval "
+        // Use C++26 with GNU extensions. The SFPI GCC implements C++20 natively, so the
+        // -ftt-nttp/-ftt-constinit/-ftt-consteval backports to C++17 are not needed
+        "-std=gnu++26 "
         // Ban dynamic initializations, via a check we've added
         "-ftt-no-dyninit "
         // Rely on Link Time Optimization (removes globally unreachable code).
@@ -281,6 +282,10 @@ void JitBuildEnv::init(
         "-Wno-error=unused-but-set-variable "
         // And don't detect these issues
         "-Wno-unused-variable -Wno-unused-function "
+        // C++20 deprecates compound assignment to and returning volatile, which MMIO register
+        // access relies on throughout the firmware and LLK headers, and bitwise operations
+        // between enumerations of different types, which the SFPI headers use
+        "-Wno-volatile -Wno-deprecated-enum-enum-conversion "
         // Firmware and kernels access mailboxes and MMIO through pointers
         // formed from small literal addresses (e.g. MEM_MAILBOX_BASE is 16
         // on Wormhole). On these bare-metal cores the bottom of the address
