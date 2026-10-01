@@ -1,0 +1,112 @@
+# Publishes the tt-metal SDK infinitum builds and analyzes against: the
+# installed headers, the device sources its kernels compile against, and SFPI's
+# headers, at ghcr.io/silvanshade/tt-metal-sdk:<revision>. No libraries and no
+# compilers: infinitum's hosted lanes compile and lint, they never link or run.
+name: infinitum SDK image
+
+on:
+  push:
+    branches: [tt-metal-integration]
+
+permissions: {}
+
+concurrency:
+  group: infinitum-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/silvanshade/tt-metal-sdk
+  # Tenstorrent's own build environment: its toolchain file, system packages
+  # and SFPI download are what tt-metal's CMake expects.
+  BUILDER: ghcr.io/tenstorrent/tt-metal/tt-metalium/ubuntu-24.04-ci-build-amd64@sha256:5d032deb1373a0d6aeee91502b908d61e64881a100c330a5fde81056749cf89e
+
+jobs:
+  publish:
+    name: build and publish the SDK image
+    # The private review repository carries this file too; only the public
+    # fork publishes.
+    if: ${{ github.repository == 'silvanshade/tt-metal' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # A revision is published once; a rerun on the same commit is a no-op.
+      - id: published
+        name: look up the revision's image
+        shell: bash
+        run: |
+          if error=$(docker manifest inspect "${IMAGE}:${GITHUB_SHA}" 2>&1 > /dev/null); then
+            echo found=true >> "$GITHUB_OUTPUT"
+          elif [[ $error == *"manifest unknown"* ]]; then
+            echo found=false >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' "$error" >&2
+            exit 1
+          fi
+      - name: git checkout
+        if: &build ${{ steps.published.outputs.found == 'false' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+      # The header install needs the generated headers `tt_metal` produces, and
+      # the runtime component's other inputs built. Firmware is not shipped, so
+      # its install directory only has to exist.
+      - name: build and install the headers
+        if: *build
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp
+          -v "$GITHUB_WORKSPACE:/src" -w /src "$BUILDER" bash -euo pipefail -c '
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-linux-clang-20-libstdcpp-toolchain.cmake
+          -DCMAKE_INSTALL_PREFIX=/src/sdk -DWITH_PYTHON_BINDINGS=OFF;
+          cmake --build build --target tt_metal fmt generate_rank_bindings;
+          mkdir -p tt_metal/pre-compiled;
+          for component in metalium-dev metalium-runtime jit-build umd-dev umd-runtime tt-logger-dev spdlog-dev fmt-core json-dev enchantum Headers; do
+          cmake --install build --component "$component";
+          done'
+      # Keep the include tree and the device sources; drop libraries, tools,
+      # firmware and SFPI's compiler binaries. Clang analyzes the kernels, so
+      # only SFPI's headers and GCC's builtin include directory stay.
+      - name: assemble the image tree
+        if: *build
+        run: |
+          mkdir -p image/opt/tt-metal/lib image/opt/tt-metal/libexec/tt-metalium
+          cp -a sdk/include image/opt/tt-metal/
+          tar -C sdk/libexec/tt-metalium -cf - \
+            --exclude=tt_metal/pre-compiled \
+            --exclude=runtime/sfpi/compiler/bin \
+            --exclude=runtime/sfpi/compiler/libexec \
+            --exclude=runtime/sfpi/compiler/share \
+            --exclude=runtime/sfpi/compiler/riscv-tt-elf/bin \
+            --exclude=runtime/sfpi/compiler/riscv-tt-elf/lib \
+            --exclude='runtime/sfpi/compiler/lib/gcc/riscv-tt-elf/*/*-*' \
+            --exclude='runtime/sfpi/compiler/lib/gcc/riscv-tt-elf/*/*.a' \
+            --exclude='runtime/sfpi/compiler/lib/gcc/riscv-tt-elf/*/*.o' \
+            . | tar -C image/opt/tt-metal/libexec/tt-metalium -xf -
+          echo "$GITHUB_SHA" > image/opt/tt-metal/libexec/tt-metalium/tt-metal.revision
+          printf 'FROM scratch\nCOPY opt /opt\n' > image/Dockerfile
+          du -sh image/opt/tt-metal/*
+      - name: set up buildx
+        if: *build
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # The files are architecture-independent; both platforms let a native
+      # arm64 build copy them without emulation.
+      - name: publish the image
+        if: *build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: image
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
