@@ -202,6 +202,27 @@ class DropInVisionTransformer(torch.nn.Module):
     def spatial_merge_size(self):
         return self.model_args.hf_config.vision_config.spatial_merge_size
 
+    def _interpolated_pos_embeds(self, grid_thw: torch.Tensor) -> torch.Tensor:
+        """Bilinearly interpolated learned position embeddings [seq, hidden] for grid_thw.
+
+        transformers <= 5.12 exposes this as Qwen3_5VisionModel.fast_pos_embed_interpolate;
+        5.13+ split it into get_vision_interpolation_indices_and_weights + a gathered pos_embed
+        (the body of Qwen3_5VisionModel.forward). Same values either way.
+        """
+        ref = self.reference_model
+        if hasattr(ref, "fast_pos_embed_interpolate"):
+            return ref.fast_pos_embed_interpolate(grid_thw)
+        from transformers.models.qwen3_5.modeling_qwen3_5 import get_vision_interpolation_indices_and_weights
+
+        idx, weights = get_vision_interpolation_indices_and_weights(
+            grid_thw,
+            num_grid_per_side=ref.num_grid_per_side,
+            mode=ref.interpolation_mode,
+            align_corners=ref.interpolation_align_corners,
+            spatial_merge_size=self.spatial_merge_size,
+        )
+        return (ref.pos_embed(idx) * weights[:, :, None]).sum(1)
+
     def forward(self, pixel_values: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
         """
         Forward pass mimicking the Qwen3_5_VisionTransformerPretrainedModel interface.
@@ -241,8 +262,7 @@ class DropInVisionTransformer(torch.nn.Module):
 
             # 3. Use reference model's patch embedding
             patch_input = self.reference_model.patch_embed(pixel_values)
-            pos_embeds = self.reference_model.fast_pos_embed_interpolate(grid_thw)
-            patch_input = patch_input + pos_embeds
+            patch_input = patch_input + self._interpolated_pos_embeds(grid_thw).to(patch_input.dtype)
 
             # 4. Prepare rotational embeddings (cos, sin) -> pad -> convert to TT tensors
             cos_orig, sin_orig = position_embeddings
